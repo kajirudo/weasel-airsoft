@@ -173,3 +173,34 @@ export async function registerHit(params: {
     throttled:  data.throttled  ?? false,
   }
 }
+
+// ─── Kill Cam ─────────────────────────────────────────────────────────────────
+
+/**
+ * killcam 画像を Supabase Storage にアップロードし、公開 URL を返す。
+ * FormData の構造:
+ *   file            — JPEG Blob (image/jpeg)
+ *   gameId          — ゲームID
+ *   targetPlayerId  — 対象プレイヤーID
+ */
+export async function uploadKillcam(formData: FormData): Promise<string> {
+  const file           = formData.get('file')           as File   | null
+  const gameId         = formData.get('gameId')         as string | null
+  const targetPlayerId = formData.get('targetPlayerId') as string | null
+
+  if (!file || !gameId || !targetPlayerId) {
+    throw new Error('uploadKillcam: 必須パラメータが不足しています')
+  }
+
+  const supabase = createServerClient()
+  const path     = `${gameId}/${targetPlayerId}/${Date.now()}.jpg`
+
+  const { error } = await supabase.storage
+    .from('killcam')
+    .upload(path, file, { contentType: 'image/jpeg', upsert: false })
+
+  if (error) throw new Error(`Storage upload failed: ${error.message}`)
+
+  const { data } = supabase.storage.from('killcam').getPublicUrl(path)
+  return data.publicUrl
+}

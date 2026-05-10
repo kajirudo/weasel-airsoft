@@ -2,28 +2,32 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { CameraView }          from '@/components/game/CameraView'
-import { HpOverlay }           from '@/components/game/HpOverlay'
-import { HitFlash }            from '@/components/game/HitFlash'
-import { ConnectionWarning }   from '@/components/game/ConnectionWarning'
-import { SpectatorView }       from '@/components/game/SpectatorView'
-import { TimerDisplay }        from '@/components/game/TimerDisplay'
-import { CountdownOverlay }    from '@/components/game/CountdownOverlay'
+import { CameraView }            from '@/components/game/CameraView'
+import type { CameraViewHandle } from '@/components/game/CameraView'
+import { HpOverlay }             from '@/components/game/HpOverlay'
+import { HitFlash }              from '@/components/game/HitFlash'
+import { ConnectionWarning }     from '@/components/game/ConnectionWarning'
+import { SpectatorView }         from '@/components/game/SpectatorView'
+import { TimerDisplay }          from '@/components/game/TimerDisplay'
+import { CountdownOverlay }      from '@/components/game/CountdownOverlay'
 import { KillFeed, useKillFeed } from '@/components/game/KillFeed'
-import { ChatPanel }           from '@/components/game/ChatPanel'
-import { Button }              from '@/components/ui/Button'
-import { ShareGameId }         from '@/components/lobby/ShareGameId'
-import { GameSettings }        from '@/components/lobby/GameSettings'
-import { usePlayerRealtime }   from '@/hooks/usePlayerRealtime'
-import { useGameRealtime }     from '@/hooks/useGameRealtime'
-import { useHitEffect }        from '@/hooks/useHitEffect'
-import { useWakeLock }         from '@/hooks/useWakeLock'
-import { useHeartbeat }        from '@/hooks/useHeartbeat'
-import { useSound }            from '@/hooks/useSound'
-import { useGameTimer }        from '@/hooks/useGameTimer'
-import { useCountdown }        from '@/hooks/useCountdown'
-import { useGameChat }         from '@/hooks/useGameChat'
-import { registerHit, startGame, finishGameByTimeout } from '@/lib/game/actions'
+import { ChatPanel }             from '@/components/game/ChatPanel'
+import { KillcamOverlay }        from '@/components/game/KillcamOverlay'
+import { Button }                from '@/components/ui/Button'
+import { ShareGameId }           from '@/components/lobby/ShareGameId'
+import { GameSettings }          from '@/components/lobby/GameSettings'
+import { usePlayerRealtime }     from '@/hooks/usePlayerRealtime'
+import { useGameRealtime }       from '@/hooks/useGameRealtime'
+import { useHitEffect }          from '@/hooks/useHitEffect'
+import { useWakeLock }           from '@/hooks/useWakeLock'
+import { useHeartbeat }          from '@/hooks/useHeartbeat'
+import { useSound }              from '@/hooks/useSound'
+import { useGameTimer }          from '@/hooks/useGameTimer'
+import { useCountdown }          from '@/hooks/useCountdown'
+import { useGameChat }           from '@/hooks/useGameChat'
+import { useKillcam }            from '@/hooks/useKillcam'
+import { registerHit, startGame, finishGameByTimeout, uploadKillcam } from '@/lib/game/actions'
+import { compositeKillcam }      from '@/lib/game/killcam-capture'
 import { MAX_HP, HIT_DAMAGE, STICKY_GRACE_MS, AUTO_FIRE_HOLD_MS } from '@/lib/game/constants'
 import type { DetectedQR, LocalPlayerSession } from '@/types/game'
 import type { Player, QrCodeId } from '@/types/database'
@@ -53,9 +57,15 @@ export default function GamePage() {
   const [stickyInReticle, setStickyInReticle] = useState(false)
   // チャージリングのアニメーションを再起動するキー（ターゲットが変わるたびに変わる）
   const [chargeKey, setChargeKey] = useState(0)
-  const lastTargetQRIdRef = useRef<QrCodeId | null>(null)
-  const handleShootRef    = useRef<() => void>(() => {})
-  const gamepadRafRef     = useRef<number>(0)
+  const lastTargetQRIdRef  = useRef<QrCodeId | null>(null)
+  const handleShootRef     = useRef<() => void>(() => {})
+  const gamepadRafRef      = useRef<number>(0)
+  // CameraView への ref（captureFrame() 公開）
+  const cameraViewRef      = useRef<CameraViewHandle>(null)
+  // killcam 合成+送信ロジック（最新の players/session を参照するため ref で保持）
+  const captureKillcamRef  = useRef<(targetQrCodeId: QrCodeId) => void>(() => {})
+  // players を ref でも保持（useCallback の stale closure を避けるため）
+  const playersRef         = useRef<Player[]>([])
 
   useWakeLock()
 
@@ -80,6 +90,9 @@ export default function GamePage() {
     usePlayerRealtime(gameId, handleHpChange, handleKill)
   const { game, realtimeStatus: gameStatus }      = useGameRealtime(gameId)
 
+  // playersRef を最新状態に同期（captureKillcamRef 内で stale closure を避けるため）
+  useEffect(() => { playersRef.current = players }, [players])
+
   useHeartbeat({
     gameId,
     playerId:   session?.playerId,
@@ -95,6 +108,9 @@ export default function GamePage() {
     messages: chatMessages, unreadCount, isPanelOpen,
     openPanel, closePanel, sendStamp,
   } = useGameChat(gameId, session?.name)
+
+  // Kill Cam（受信 + 送信チャンネル）
+  const { killcam, dismiss: dismissKillcam, sendKillcam } = useKillcam(gameId, session?.playerId)
 
   // 接続状態の統合
   const worstStatus = (() => {
@@ -151,6 +167,8 @@ export default function GamePage() {
       })
       if (!result.throttled) {
         result.gameOver ? playKill() : playShot()
+        // キルカム: ヒットが確定したら非同期でキャプチャ＆配信（エラーは無視）
+        captureKillcamRef.current(targetQrCodeId)
       }
     } catch { /* 無視 */ }
   }, [session, gameId, shootCooldown, isOffline, cdBlock, game?.status, playShot, playKill])
@@ -170,6 +188,46 @@ export default function GamePage() {
 
   // handleShootRef を最新の handleShootSticky に同期
   useEffect(() => { handleShootRef.current = handleShootSticky }, [handleShootSticky])
+
+  // ── captureKillcamRef: 常に最新の players/session/sendKillcam を参照 ──────
+  useEffect(() => {
+    captureKillcamRef.current = async (targetQrCodeId: QrCodeId) => {
+      if (!session) return
+
+      // カメラフレームをキャプチャ
+      const snap = cameraViewRef.current?.captureFrame()
+      if (!snap) return
+
+      // 対象プレイヤーを特定
+      const targetPlayer = playersRef.current.find((p) => p.qr_code_id === targetQrCodeId)
+      if (!targetPlayer) return
+
+      try {
+        // オーバーレイを合成して JPEG に変換
+        const blob = await compositeKillcam(snap, {
+          shooterName: session.name,
+          timestamp:   new Date(),
+        })
+
+        // Server Action でストレージにアップロード
+        const fd = new FormData()
+        fd.set('file',           new File([blob], 'killcam.jpg', { type: 'image/jpeg' }))
+        fd.set('gameId',         gameId)
+        fd.set('targetPlayerId', targetPlayer.id)
+        const imageUrl = await uploadKillcam(fd)
+
+        // Broadcast で対象プレイヤーに配信
+        await sendKillcam({
+          imageUrl,
+          shooterName:    session.name,
+          timestamp:      new Date().toISOString(),
+          targetPlayerId: targetPlayer.id,
+        })
+      } catch {
+        // キルカムの失敗はゲームプレイに影響しないため無視
+      }
+    }
+  }, [session, gameId, sendKillcam])
 
   // ── スティッキー検知 ────────────────────────────────────────────────────
   useEffect(() => {
@@ -279,6 +337,7 @@ export default function GamePage() {
       ) : (
         <>
           <CameraView
+            ref={cameraViewRef}
             onQRDetected={setDetectedQR}
             onShoot={handleShoot}
             isInReticle={stickyInReticle}
@@ -414,6 +473,11 @@ export default function GamePage() {
             </button>
           </div>
         </>
+      )}
+
+      {/* ─── Kill Cam オーバーレイ（自分が撃たれたとき） ─────────────────── */}
+      {killcam && (
+        <KillcamOverlay data={killcam} onDismiss={dismissKillcam} />
       )}
     </div>
   )
