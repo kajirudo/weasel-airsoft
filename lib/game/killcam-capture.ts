@@ -9,12 +9,25 @@ export interface KillcamCaptureOptions {
   timestamp:   Date
 }
 
+/**
+ * 出力解像度の上限（px）。
+ * 1280×720 → 960×540 にスケールダウンすることで、
+ * 屋外サバゲーシーンでも JPEG を 200 KB 前後に抑える。
+ * モバイル画面（max-w-sm = 384px CSS）では十分な画質。
+ */
+const MAX_OUTPUT_WIDTH = 960
+
 export async function compositeKillcam(
   sourceCanvas: HTMLCanvasElement,
   opts: KillcamCaptureOptions,
 ): Promise<Blob> {
-  const W = sourceCanvas.width  || 640
-  const H = sourceCanvas.height || 480
+  const srcW = sourceCanvas.width  || 640
+  const srcH = sourceCanvas.height || 480
+
+  // 長辺が MAX_OUTPUT_WIDTH を超える場合はアスペクト比を保ってリサイズ
+  const scale = srcW > MAX_OUTPUT_WIDTH ? MAX_OUTPUT_WIDTH / srcW : 1
+  const W = Math.round(srcW * scale)
+  const H = Math.round(srcH * scale)
 
   const out = document.createElement('canvas')
   out.width  = W

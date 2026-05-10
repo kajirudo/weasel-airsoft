@@ -10,12 +10,12 @@ values (
   'killcam',
   'killcam',
   true,                  -- 公開バケット（署名不要で画像表示可能）
-  524288,                -- 最大 512 KB / 枚
+  1048576,               -- 最大 1 MB / 枚（960×540 JPEG で余裕）
   array['image/jpeg']
 )
 on conflict (id) do update
   set public             = excluded.public,
-      file_size_limit    = excluded.file_size_limit,
+      file_size_limit    = excluded.file_size_limit,  -- 1 048 576 = 1 MB
       allowed_mime_types = excluded.allowed_mime_types;
 
 -- 2. ポリシー: サービスロール（Server Action）からの INSERT を許可
