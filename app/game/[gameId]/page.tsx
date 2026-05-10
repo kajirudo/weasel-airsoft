@@ -24,9 +24,9 @@ import { useGameTimer }        from '@/hooks/useGameTimer'
 import { useCountdown }        from '@/hooks/useCountdown'
 import { useGameChat }         from '@/hooks/useGameChat'
 import { registerHit, startGame, finishGameByTimeout } from '@/lib/game/actions'
-import { MAX_HP, HIT_DAMAGE }  from '@/lib/game/constants'
+import { MAX_HP, HIT_DAMAGE, STICKY_GRACE_MS, AUTO_FIRE_HOLD_MS } from '@/lib/game/constants'
 import type { DetectedQR, LocalPlayerSession } from '@/types/game'
-import type { Player } from '@/types/database'
+import type { Player, QrCodeId } from '@/types/database'
 
 const DEFAULT_SHOOT_COOLDOWN = 800
 
@@ -44,6 +44,18 @@ export default function GamePage() {
     teamMode:        false,
   })
   const lastShotRef = useRef(0)
+
+  // ── オートファイア / スティッキー検知 ──────────────────────────────────────
+  const [autoFireEnabled, setAutoFireEnabled] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return localStorage.getItem('weasel_autofire') !== 'false'
+  })
+  const [stickyInReticle, setStickyInReticle] = useState(false)
+  // チャージリングのアニメーションを再起動するキー（ターゲットが変わるたびに変わる）
+  const [chargeKey, setChargeKey] = useState(0)
+  const lastTargetQRIdRef = useRef<QrCodeId | null>(null)
+  const handleShootRef    = useRef<() => void>(() => {})
+  const gamepadRafRef     = useRef<number>(0)
 
   useWakeLock()
 
@@ -120,11 +132,11 @@ export default function GamePage() {
 
   const shootCooldown = game?.shoot_cooldown ?? DEFAULT_SHOOT_COOLDOWN
 
-  // 射撃ハンドラ
-  const handleShoot = useCallback(async () => {
-    if (!session || !detectedQR?.isInReticle) return
-    if (detectedQR.qrCodeId === session.qrCodeId) return
-    if (isOffline || cdBlock) return
+  // ── 射撃コア（ID指定） ────────────────────────────────────────────────────
+  const shootTarget = useCallback(async (targetQrCodeId: QrCodeId) => {
+    if (!session) return
+    if (targetQrCodeId === session.qrCodeId) return
+    if (isOffline || cdBlock || game?.status !== 'active') return
 
     const now = Date.now()
     if (now - lastShotRef.current < shootCooldown) return
@@ -135,13 +147,103 @@ export default function GamePage() {
         gameId,
         shooterPlayerId: session.playerId,
         shooterDeviceId: session.deviceId,
-        targetQrCodeId:  detectedQR.qrCodeId,
+        targetQrCodeId,
       })
       if (!result.throttled) {
         result.gameOver ? playKill() : playShot()
       }
     } catch { /* 無視 */ }
-  }, [session, detectedQR, gameId, shootCooldown, isOffline, cdBlock, playShot, playKill])
+  }, [session, gameId, shootCooldown, isOffline, cdBlock, game?.status, playShot, playKill])
+
+  // マニュアル射撃（タップ）— レティクル内に QR が映っているときのみ
+  const handleShoot = useCallback(async () => {
+    if (!detectedQR?.isInReticle) return
+    await shootTarget(detectedQR.qrCodeId)
+  }, [detectedQR, shootTarget])
+
+  // スティッキー射撃（オートファイア / BT トリガー用）— lastTargetQRIdRef が有効なら射撃
+  const handleShootSticky = useCallback(async () => {
+    const qrId = lastTargetQRIdRef.current
+    if (!qrId) return
+    await shootTarget(qrId)
+  }, [shootTarget])
+
+  // handleShootRef を最新の handleShootSticky に同期
+  useEffect(() => { handleShootRef.current = handleShootSticky }, [handleShootSticky])
+
+  // ── スティッキー検知 ────────────────────────────────────────────────────
+  useEffect(() => {
+    const isIn = detectedQR?.isInReticle ?? false
+    const qrId = detectedQR?.qrCodeId ?? null
+
+    if (isIn && qrId) {
+      if (qrId !== lastTargetQRIdRef.current) {
+        // 新しいターゲット取得 → チャージアニメーションをリセット
+        lastTargetQRIdRef.current = qrId as QrCodeId
+        setChargeKey((k) => k + 1)
+      }
+      setStickyInReticle(true)
+      return
+    }
+
+    // QR がレティクルを外れた → グレース期間後に解除
+    const timer = window.setTimeout(() => {
+      setStickyInReticle(false)
+      lastTargetQRIdRef.current = null
+    }, STICKY_GRACE_MS)
+    return () => clearTimeout(timer)
+  }, [detectedQR?.isInReticle, detectedQR?.qrCodeId])
+
+  // ── オートファイア ────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!autoFireEnabled || !stickyInReticle) return
+    // AUTO_FIRE_HOLD_MS ごとに射撃を試みる（実際の発射はクールダウンで制御）
+    const interval = window.setInterval(() => {
+      handleShootRef.current()
+    }, AUTO_FIRE_HOLD_MS)
+    return () => clearInterval(interval)
+  }, [stickyInReticle, autoFireEnabled])
+
+  // ── Bluetooth トリガー: キーボードイベント ────────────────────────────────
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // BT カメラリモコンは Space/Enter/VolumeUp を送信することが多い
+      if (['Space', 'Enter', 'VolumeUp', 'AudioVolumeUp'].includes(e.code)) {
+        e.preventDefault()
+        handleShootRef.current()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
+
+  // ── Bluetooth トリガー: Gamepad API ──────────────────────────────────────
+  useEffect(() => {
+    const prevPressed = new Map<string, boolean>()
+
+    const poll = () => {
+      const pads = navigator.getGamepads?.() ?? []
+      for (const pad of pads) {
+        if (!pad) continue
+        pad.buttons.forEach((btn, idx) => {
+          const key  = `${pad.index}-${idx}`
+          const was  = prevPressed.get(key) ?? false
+          const now  = btn.pressed
+          prevPressed.set(key, now)
+          if (now && !was) handleShootRef.current()   // エッジ検出（押した瞬間のみ）
+        })
+      }
+      gamepadRafRef.current = requestAnimationFrame(poll)
+    }
+
+    gamepadRafRef.current = requestAnimationFrame(poll)
+    return () => cancelAnimationFrame(gamepadRafRef.current)
+  }, [])
+
+  // オートファイアの設定を localStorage に保存
+  useEffect(() => {
+    localStorage.setItem('weasel_autofire', String(autoFireEnabled))
+  }, [autoFireEnabled])
 
   const handleStartGame = async () => {
     setIsStarting(true)
@@ -179,12 +281,48 @@ export default function GamePage() {
           <CameraView
             onQRDetected={setDetectedQR}
             onShoot={handleShoot}
-            isInReticle={detectedQR?.isInReticle ?? false}
+            isInReticle={stickyInReticle}
             offline={isOffline || cdBlock}
           />
           <HitFlash isFlashing={isFlashing} />
           {isActive && <TimerDisplay remainingSeconds={remainingSeconds} />}
           {selfPlayer && <HpOverlay selfPlayer={selfPlayer} allPlayers={players} />}
+
+          {/* ─── チャージリング（オートファイア中） ──────────────────────── */}
+          {isActive && autoFireEnabled && stickyInReticle && !isOffline && !cdBlock && (
+            <div
+              key={chargeKey}
+              className="absolute inset-0 flex items-center justify-center pointer-events-none"
+            >
+              <svg width="160" height="160" viewBox="0 0 160 160">
+                <circle
+                  cx="80" cy="80" r="72"
+                  fill="none"
+                  stroke="rgba(255,255,255,0.15)"
+                  strokeWidth="4"
+                />
+                <circle
+                  cx="80" cy="80" r="72"
+                  fill="none"
+                  stroke="#ef4444"
+                  strokeWidth="4"
+                  strokeLinecap="round"
+                  strokeDasharray="452"
+                  strokeDashoffset="452"
+                  transform="rotate(-90 80 80)"
+                  style={{
+                    animation: `charge-fill ${AUTO_FIRE_HOLD_MS}ms linear infinite`,
+                  }}
+                />
+              </svg>
+              <style>{`
+                @keyframes charge-fill {
+                  from { stroke-dashoffset: 452; }
+                  to   { stroke-dashoffset: 0;   }
+                }
+              `}</style>
+            </div>
+          )}
         </>
       )}
 
@@ -243,13 +381,16 @@ export default function GamePage() {
       {/* ─── ゲーム中ヒント ───────────────────────────────────────────────── */}
       {isActive && !isDead && (
         <>
-          {detectedQR && !detectedQR.isInReticle && !isOffline && !cdBlock && (
+          {/* QR検出中だがレティクル外のヒント */}
+          {detectedQR && !stickyInReticle && !isOffline && !cdBlock && (
             <div className="absolute bottom-24 left-0 right-0 flex justify-center pointer-events-none">
               <div className="bg-white/20 text-white text-xs px-3 py-1 rounded-full backdrop-blur-sm">
                 QR検出 — 中央に合わせてください
               </div>
             </div>
           )}
+
+          {/* クリティカル HP 警告 */}
           {selfPlayer && selfPlayer.hp > 0 && selfPlayer.hp <= MAX_HP * 0.25 && (
             <div className="absolute bottom-36 left-0 right-0 flex justify-center pointer-events-none animate-pulse">
               <div className="bg-red-600/80 text-white text-xs font-bold px-3 py-1 rounded-full">
@@ -257,6 +398,21 @@ export default function GamePage() {
               </div>
             </div>
           )}
+
+          {/* AUTO / MANUAL トグル */}
+          <div className="absolute top-4 right-4 pointer-events-auto">
+            <button
+              onClick={() => setAutoFireEnabled((v) => !v)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
+                autoFireEnabled
+                  ? 'bg-red-600/80 border-red-500 text-white'
+                  : 'bg-black/60 border-gray-600 text-gray-400'
+              }`}
+            >
+              <span>{autoFireEnabled ? '🔴' : '⚪'}</span>
+              {autoFireEnabled ? 'AUTO' : 'MANUAL'}
+            </button>
+          </div>
         </>
       )}
     </div>

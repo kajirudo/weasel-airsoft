@@ -29,7 +29,7 @@ function QRCodeCard({ value, label, color }: { value: string; label: string; col
     import('qrcode').then((QRCode) => {
       if (canvasRef.current) {
         QRCode.toCanvas(canvasRef.current, value, {
-          width: 260,
+          width: 400,
           margin: 2,
           color: { dark: '#000000', light: '#ffffff' },
         })
@@ -70,10 +70,18 @@ export default function QRPage() {
       {/* Print-only global styles */}
       <style>{`
         @media print {
-          @page { size: A4; margin: 10mm; }
+          @page { size: A4; margin: 8mm; }
           body { background: white !important; }
           .no-print { display: none !important; }
-          .print-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12mm; }
+          .print-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8mm;
+            page-break-inside: avoid;
+          }
+          .print-grid > * {
+            break-inside: avoid;
+          }
         }
       `}</style>
 
@@ -102,10 +110,12 @@ export default function QRPage() {
 
             <div className="mt-6 bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 text-left text-sm text-gray-400 space-y-1">
               <p className="text-white font-semibold text-xs uppercase tracking-wider mb-2">印刷のヒント</p>
-              <p>• A4用紙に印刷し、点線に沿ってカット</p>
-              <p>• 最低 8cm×8cm — 大きいほど遠距離で認識しやすい</p>
-              <p>• ラミネート加工で雨・汗に強くなります</p>
+              <p>• <strong className="text-white">推奨サイズ: 25cm×25cm</strong>（5m以上の距離で確実に認識）</p>
+              <p>• A4用紙2枚に分割して並べるか、コンビニの「拡大印刷」機能を使用</p>
+              <p>• 最小でも 10cm×10cm（近距離戦のみ）</p>
+              <p>• ラミネート加工で雨・汗・泥に強くなります</p>
               <p>• 各プレイヤーに1枚ずつ配布（色でも区別できます）</p>
+              <p>• ベスト・ヘルメット・背中など平らな場所に貼付</p>
             </div>
           </div>
 
