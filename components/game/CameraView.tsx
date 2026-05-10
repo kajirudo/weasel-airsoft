@@ -28,10 +28,13 @@ function vibrate(pattern: VibratePattern) {
   if ('vibrate' in navigator) navigator.vibrate(pattern)
 }
 
+/** 倍率プリセット（端末の max zoom でフィルタリングして表示） */
+const ZOOM_PRESETS = [1, 2, 4] as const
+
 export const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(
   function CameraView({ onQRDetected, onShoot, isInReticle, offline = false }, ref) {
     const canvasRef = useRef<HTMLCanvasElement>(null)
-    const { videoRef, isReady, error } = useCamera()
+    const { videoRef, isReady, error, zoomInfo, setZoom } = useCamera()
     const { detectedQR } = useQRScanner({ videoRef, canvasRef, enabled: isReady })
 
     // 親コンポーネントへ captureFrame を公開
@@ -56,14 +59,18 @@ export const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(
 
     const handleTap = useCallback(() => {
       if (offline) {
-        // 通信切断中は「操作不可」のロングバズでフィードバック
         vibrate(200)
         return
       }
-      // ヒット: パルス2回 / ミス: 単発
       vibrate(isInReticle ? [30, 40, 30] : 50)
       onShoot()
     }, [isInReticle, onShoot, offline])
+
+    // 端末が対応している倍率プリセットだけ表示
+    const availablePresets = zoomInfo
+      ? ZOOM_PRESETS.filter((z) => z <= zoomInfo.max)
+      : []
+    const currentZoom = zoomInfo?.current ?? 1
 
     if (error) {
       return (
@@ -83,7 +90,36 @@ export const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(
           className="absolute inset-0 w-full h-full object-cover"
         />
         <canvas ref={canvasRef} className="hidden" />
-        <Reticle active={isInReticle} offline={offline} />
+
+        {/* レティクル（ズーム倍率を渡してスコープ表示を切り替える） */}
+        <Reticle active={isInReticle} offline={offline} zoom={currentZoom} />
+
+        {/* ズーム切り替えボタン（対応端末かつ2種類以上ある場合のみ表示） */}
+        {availablePresets.length >= 2 && (
+          <div
+            className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-2"
+            // タップイベントが handleTap に伝播するのを防ぐ
+            onClick={(e) => e.stopPropagation()}
+          >
+            {availablePresets.map((z) => {
+              const isActive = Math.round(currentZoom) === z
+              return (
+                <button
+                  key={z}
+                  onClick={() => setZoom(z)}
+                  className={[
+                    'w-12 h-8 rounded-full text-xs font-bold transition-all select-none',
+                    isActive
+                      ? 'bg-white text-black scale-110 shadow-lg'
+                      : 'bg-black/50 text-white border border-white/30 active:bg-black/80',
+                  ].join(' ')}
+                >
+                  {z}×
+                </button>
+              )
+            })}
+          </div>
+        )}
       </div>
     )
   },
