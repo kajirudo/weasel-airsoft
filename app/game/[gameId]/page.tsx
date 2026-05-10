@@ -26,8 +26,9 @@ import { useGameTimer }          from '@/hooks/useGameTimer'
 import { useCountdown }          from '@/hooks/useCountdown'
 import { useGameChat }           from '@/hooks/useGameChat'
 import { useKillcam }            from '@/hooks/useKillcam'
-import { registerHit, startGame, finishGameByTimeout, uploadKillcam } from '@/lib/game/actions'
+import { registerHit, startGame, finishGameByTimeout } from '@/lib/game/actions'
 import { compositeKillcam }      from '@/lib/game/killcam-capture'
+import { createClient }          from '@/lib/supabase/client'
 import { MAX_HP, HIT_DAMAGE, STICKY_GRACE_MS, AUTO_FIRE_HOLD_MS } from '@/lib/game/constants'
 import type { DetectedQR, LocalPlayerSession } from '@/types/game'
 import type { Player, QrCodeId } from '@/types/database'
@@ -63,7 +64,8 @@ export default function GamePage() {
   // CameraView への ref（captureFrame() 公開）
   const cameraViewRef      = useRef<CameraViewHandle>(null)
   // killcam 合成+送信ロジック（最新の players/session を参照するため ref で保持）
-  const captureKillcamRef  = useRef<(targetQrCodeId: QrCodeId) => void>(() => {})
+  // snap は registerHit 前にキャプチャしたフレームを受け取る
+  const captureKillcamRef  = useRef<(targetQrCodeId: QrCodeId, snap: HTMLCanvasElement | null) => void>(() => {})
   // players を ref でも保持（useCallback の stale closure を避けるため）
   const playersRef         = useRef<Player[]>([])
 
@@ -158,6 +160,9 @@ export default function GamePage() {
     if (now - lastShotRef.current < shootCooldown) return
     lastShotRef.current = now
 
+    // ① registerHit の前にフレームをキャプチャ（「撃った瞬間」の画像を保証）
+    const snap = cameraViewRef.current?.captureFrame() ?? null
+
     try {
       const result = await registerHit({
         gameId,
@@ -167,8 +172,8 @@ export default function GamePage() {
       })
       if (!result.throttled) {
         result.gameOver ? playKill() : playShot()
-        // キルカム: ヒットが確定したら非同期でキャプチャ＆配信（エラーは無視）
-        captureKillcamRef.current(targetQrCodeId)
+        // ② ヒット確定後、キャプチャ済み snap を渡して合成・配信（非同期・失敗無視）
+        captureKillcamRef.current(targetQrCodeId, snap)
       }
     } catch { /* 無視 */ }
   }, [session, gameId, shootCooldown, isOffline, cdBlock, game?.status, playShot, playKill])
@@ -190,35 +195,38 @@ export default function GamePage() {
   useEffect(() => { handleShootRef.current = handleShootSticky }, [handleShootSticky])
 
   // ── captureKillcamRef: 常に最新の players/session/sendKillcam を参照 ──────
+  // snap は shootTarget が registerHit 前にキャプチャしたフレームを受け取る
   useEffect(() => {
-    captureKillcamRef.current = async (targetQrCodeId: QrCodeId) => {
-      if (!session) return
-
-      // カメラフレームをキャプチャ
-      const snap = cameraViewRef.current?.captureFrame()
-      if (!snap) return
+    captureKillcamRef.current = async (
+      targetQrCodeId: QrCodeId,
+      snap: HTMLCanvasElement | null,
+    ) => {
+      if (!session || !snap) return
 
       // 対象プレイヤーを特定
       const targetPlayer = playersRef.current.find((p) => p.qr_code_id === targetQrCodeId)
       if (!targetPlayer) return
 
       try {
-        // オーバーレイを合成して JPEG に変換
+        // オーバーレイを合成して JPEG Blob に変換
         const blob = await compositeKillcam(snap, {
           shooterName: session.name,
           timestamp:   new Date(),
         })
 
-        // Server Action でストレージにアップロード
-        const fd = new FormData()
-        fd.set('file',           new File([blob], 'killcam.jpg', { type: 'image/jpeg' }))
-        fd.set('gameId',         gameId)
-        fd.set('targetPlayerId', targetPlayer.id)
-        const imageUrl = await uploadKillcam(fd)
+        // Supabase Storage へブラウザから直接アップロード（Server Action を経由しない）
+        const supabase = createClient()
+        const path     = `${gameId}/${targetPlayer.id}/${Date.now()}.jpg`
+        const { error } = await supabase.storage
+          .from('killcam')
+          .upload(path, blob, { contentType: 'image/jpeg', upsert: false })
+        if (error) throw error
+
+        const { data: urlData } = supabase.storage.from('killcam').getPublicUrl(path)
 
         // Broadcast で対象プレイヤーに配信
         await sendKillcam({
-          imageUrl,
+          imageUrl:       urlData.publicUrl,
           shooterName:    session.name,
           timestamp:      new Date().toISOString(),
           targetPlayerId: targetPlayer.id,
