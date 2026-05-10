@@ -27,7 +27,9 @@ interface LobbyFormProps {
 
 export function LobbyForm({ initialCode }: LobbyFormProps) {
   const router  = useRouter()
-  const [name,    setName]    = useState('')
+  const [name,    setName]    = useState(() =>
+    typeof window !== 'undefined' ? (localStorage.getItem('weasel_player_name') ?? '') : ''
+  )
   const [code,    setCode]    = useState(initialCode ?? '')
   const [mode,    setMode]    = useState<'select' | 'join'>(initialCode ? 'join' : 'select')
   const [loading, setLoading] = useState<'create' | 'join' | 'quick' | null>(null)
@@ -41,6 +43,7 @@ export function LobbyForm({ initialCode }: LobbyFormProps) {
   async function handleCreate() {
     if (!requireName()) return
     setLoading('create'); setError(null)
+    localStorage.setItem('weasel_player_name', name.trim())
     try {
       const deviceId = getOrCreateDeviceId()
       const { gameId } = await createGame()
@@ -57,6 +60,7 @@ export function LobbyForm({ initialCode }: LobbyFormProps) {
     if (!requireName()) return
     if (!code.trim()) return setError('ゲームコードを入力してください')
     setLoading('join'); setError(null)
+    localStorage.setItem('weasel_player_name', name.trim())
     try {
       const deviceId = getOrCreateDeviceId()
       const { playerId, qrCodeId, gameId } = await joinGame({
@@ -73,6 +77,7 @@ export function LobbyForm({ initialCode }: LobbyFormProps) {
   async function handleQuickMatch() {
     if (!requireName()) return
     setLoading('quick'); setError(null)
+    localStorage.setItem('weasel_player_name', name.trim())
     try {
       const deviceId = getOrCreateDeviceId()
       const { playerId, qrCodeId, gameId } = await quickMatch({ name: name.trim(), deviceId })

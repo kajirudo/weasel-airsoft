@@ -2,22 +2,27 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { CameraView }         from '@/components/game/CameraView'
-import { HpOverlay }          from '@/components/game/HpOverlay'
-import { HitFlash }           from '@/components/game/HitFlash'
-import { ConnectionWarning }  from '@/components/game/ConnectionWarning'
-import { SpectatorView }      from '@/components/game/SpectatorView'
-import { TimerDisplay }       from '@/components/game/TimerDisplay'
-import { Button }             from '@/components/ui/Button'
-import { ShareGameId }        from '@/components/lobby/ShareGameId'
-import { GameSettings }       from '@/components/lobby/GameSettings'
-import { usePlayerRealtime }  from '@/hooks/usePlayerRealtime'
-import { useGameRealtime }    from '@/hooks/useGameRealtime'
-import { useHitEffect }       from '@/hooks/useHitEffect'
-import { useWakeLock }        from '@/hooks/useWakeLock'
-import { useHeartbeat }       from '@/hooks/useHeartbeat'
-import { useSound }           from '@/hooks/useSound'
-import { useGameTimer }       from '@/hooks/useGameTimer'
+import { CameraView }          from '@/components/game/CameraView'
+import { HpOverlay }           from '@/components/game/HpOverlay'
+import { HitFlash }            from '@/components/game/HitFlash'
+import { ConnectionWarning }   from '@/components/game/ConnectionWarning'
+import { SpectatorView }       from '@/components/game/SpectatorView'
+import { TimerDisplay }        from '@/components/game/TimerDisplay'
+import { CountdownOverlay }    from '@/components/game/CountdownOverlay'
+import { KillFeed, useKillFeed } from '@/components/game/KillFeed'
+import { ChatPanel }           from '@/components/game/ChatPanel'
+import { Button }              from '@/components/ui/Button'
+import { ShareGameId }         from '@/components/lobby/ShareGameId'
+import { GameSettings }        from '@/components/lobby/GameSettings'
+import { usePlayerRealtime }   from '@/hooks/usePlayerRealtime'
+import { useGameRealtime }     from '@/hooks/useGameRealtime'
+import { useHitEffect }        from '@/hooks/useHitEffect'
+import { useWakeLock }         from '@/hooks/useWakeLock'
+import { useHeartbeat }        from '@/hooks/useHeartbeat'
+import { useSound }            from '@/hooks/useSound'
+import { useGameTimer }        from '@/hooks/useGameTimer'
+import { useCountdown }        from '@/hooks/useCountdown'
+import { useGameChat }         from '@/hooks/useGameChat'
 import { registerHit, startGame, finishGameByTimeout } from '@/lib/game/actions'
 import { MAX_HP, HIT_DAMAGE }  from '@/lib/game/constants'
 import type { DetectedQR, LocalPlayerSession } from '@/types/game'
@@ -36,26 +41,32 @@ export default function GamePage() {
     hitDamage:       HIT_DAMAGE,
     shootCooldown:   DEFAULT_SHOOT_COOLDOWN,
     durationMinutes: 0,
+    teamMode:        false,
   })
   const lastShotRef = useRef(0)
 
   useWakeLock()
 
-  const { isFlashing, triggerFlash } = useHitEffect()
+  const { isFlashing, triggerFlash }              = useHitEffect()
   const { playShot, playHit, playKill, playTimeout } = useSound()
+  const { events: killEvents, addKill }           = useKillFeed()
 
+  // キル通知コールバック（usePlayerRealtime へ渡す）
+  const handleKill = useCallback((victimName: string, killerName: string) => {
+    addKill(victimName, killerName)
+  }, [addKill])
+
+  // HP変化コールバック
   const handleHpChange = useCallback(
     (playerId: string, _newHp: number, _oldHp: number) => {
-      if (session && playerId === session.playerId) {
-        triggerFlash()
-        playHit()
-      }
+      if (session && playerId === session.playerId) { triggerFlash(); playHit() }
     },
     [session, triggerFlash, playHit]
   )
 
-  const { players, realtimeStatus: playerStatus } = usePlayerRealtime(gameId, handleHpChange)
-  const { game,    realtimeStatus: gameStatus   } = useGameRealtime(gameId)
+  const { players, realtimeStatus: playerStatus } =
+    usePlayerRealtime(gameId, handleHpChange, handleKill)
+  const { game, realtimeStatus: gameStatus }      = useGameRealtime(gameId)
 
   useHeartbeat({
     gameId,
@@ -64,14 +75,23 @@ export default function GamePage() {
     gameStatus: game?.status,
   })
 
-  // ─── 接続状態の統合 ─────────────────────────────────────────────────────────
+  // カウントダウン
+  const { phase: cdPhase, count: cdCount, isBlock: cdBlock } = useCountdown(game?.status)
+
+  // チャット
+  const {
+    messages: chatMessages, unreadCount, isPanelOpen,
+    openPanel, closePanel, sendStamp,
+  } = useGameChat(gameId, session?.name)
+
+  // 接続状態の統合
   const worstStatus = (() => {
     const order = { error: 0, reconnecting: 1, connecting: 2, connected: 3 } as const
     return order[playerStatus] <= order[gameStatus] ? playerStatus : gameStatus
   })()
   const isOffline = worstStatus !== 'connected'
 
-  // ─── セッション復元 ─────────────────────────────────────────────────────────
+  // セッション復元
   useEffect(() => {
     const raw = sessionStorage.getItem('weasel_session')
     if (!raw) { router.replace('/lobby'); return }
@@ -80,7 +100,7 @@ export default function GamePage() {
     setSession(s)
   }, [gameId, router])
 
-  // ─── ゲームタイマー ─────────────────────────────────────────────────────────
+  // タイマー
   const isHostRef = useRef(false)
   const selfPlayer: Player | undefined = players.find((p) => p.id === session?.playerId)
   const isHost     = players.length > 0 && players[0].id === session?.playerId
@@ -91,9 +111,7 @@ export default function GamePage() {
     durationMinutes: game?.duration_minutes ?? 0,
     status:          game?.status,
     onExpire: async () => {
-      // タイムアウト音は全員に鳴らす
       playTimeout()
-      // DB 更新はホストだけが実行（冪等なのでどちらでも安全だが通知を抑える）
       if (isHostRef.current) {
         try { await finishGameByTimeout({ gameId }) } catch { /* already finished */ }
       }
@@ -102,11 +120,11 @@ export default function GamePage() {
 
   const shootCooldown = game?.shoot_cooldown ?? DEFAULT_SHOOT_COOLDOWN
 
-  // ─── 射撃ハンドラ ───────────────────────────────────────────────────────────
+  // 射撃ハンドラ
   const handleShoot = useCallback(async () => {
     if (!session || !detectedQR?.isInReticle) return
     if (detectedQR.qrCodeId === session.qrCodeId) return
-    if (isOffline) return
+    if (isOffline || cdBlock) return
 
     const now = Date.now()
     if (now - lastShotRef.current < shootCooldown) return
@@ -120,17 +138,10 @@ export default function GamePage() {
         targetQrCodeId:  detectedQR.qrCodeId,
       })
       if (!result.throttled) {
-        if (result.gameOver) {
-          playKill()
-        } else if (result.newHp < (selfPlayer?.hp ?? MAX_HP)) {
-          // ダメージが入った
-          playShot()
-        } else {
-          playShot()
-        }
+        result.gameOver ? playKill() : playShot()
       }
     } catch { /* 無視 */ }
-  }, [session, detectedQR, gameId, shootCooldown, isOffline, playShot, playKill, selfPlayer?.hp])
+  }, [session, detectedQR, gameId, shootCooldown, isOffline, cdBlock, playShot, playKill])
 
   const handleStartGame = async () => {
     setIsStarting(true)
@@ -140,10 +151,9 @@ export default function GamePage() {
         hitDamage:       balanceSettings.hitDamage,
         shootCooldown:   balanceSettings.shootCooldown,
         durationMinutes: balanceSettings.durationMinutes,
+        teamMode:        balanceSettings.teamMode,
       })
-    } catch {
-      setIsStarting(false)
-    }
+    } catch { setIsStarting(false) }
   }
 
   const isLobby  = game?.status === 'lobby'
@@ -166,24 +176,37 @@ export default function GamePage() {
         <SpectatorView players={players} selfPlayer={selfPlayer} />
       ) : (
         <>
-          {/* カメラ + レティクル */}
           <CameraView
             onQRDetected={setDetectedQR}
             onShoot={handleShoot}
             isInReticle={detectedQR?.isInReticle ?? false}
-            offline={isOffline}
+            offline={isOffline || cdBlock}
           />
-
           <HitFlash isFlashing={isFlashing} />
-
-          {/* タイマー */}
           {isActive && <TimerDisplay remainingSeconds={remainingSeconds} />}
-
           {selfPlayer && <HpOverlay selfPlayer={selfPlayer} allPlayers={players} />}
         </>
       )}
 
-      {/* 接続状態バナー（スペクテイター中も表示） */}
+      {/* カウントダウンオーバーレイ（死亡後スペクテイター上にも表示） */}
+      <CountdownOverlay phase={cdPhase} count={cdCount} />
+
+      {/* キルフィード */}
+      {isActive && <KillFeed events={killEvents} />}
+
+      {/* チャット */}
+      {(isActive || (isDead && isActive)) && (
+        <ChatPanel
+          messages={chatMessages}
+          unreadCount={unreadCount}
+          isPanelOpen={isPanelOpen}
+          onOpen={openPanel}
+          onClose={closePanel}
+          onSendStamp={sendStamp}
+        />
+      )}
+
+      {/* 接続状態バナー */}
       <ConnectionWarning status={worstStatus} />
 
       {/* ─── ロビー中 ────────────────────────────────────────────────────── */}
@@ -192,18 +215,11 @@ export default function GamePage() {
           <div className="w-full max-w-xs pointer-events-auto">
             <ShareGameId gameId={gameId} shortCode={game?.short_code} />
           </div>
-
           {isHost && (
             <div className="w-full max-w-xs pointer-events-auto">
-              <GameSettings
-                hitDamage={balanceSettings.hitDamage}
-                shootCooldown={balanceSettings.shootCooldown}
-                durationMinutes={balanceSettings.durationMinutes}
-                onChange={setBalance}
-              />
+              <GameSettings {...balanceSettings} onChange={setBalance} />
             </div>
           )}
-
           {isHost && players.length >= 2 && (
             <div className="pointer-events-auto">
               <Button onClick={handleStartGame} loading={isStarting}>
@@ -224,17 +240,16 @@ export default function GamePage() {
         </div>
       )}
 
-      {/* ─── ゲーム中（生存時） ──────────────────────────────────────────── */}
+      {/* ─── ゲーム中ヒント ───────────────────────────────────────────────── */}
       {isActive && !isDead && (
         <>
-          {detectedQR && !detectedQR.isInReticle && !isOffline && (
+          {detectedQR && !detectedQR.isInReticle && !isOffline && !cdBlock && (
             <div className="absolute bottom-24 left-0 right-0 flex justify-center pointer-events-none">
               <div className="bg-white/20 text-white text-xs px-3 py-1 rounded-full backdrop-blur-sm">
                 QR検出 — 中央に合わせてください
               </div>
             </div>
           )}
-
           {selfPlayer && selfPlayer.hp > 0 && selfPlayer.hp <= MAX_HP * 0.25 && (
             <div className="absolute bottom-36 left-0 right-0 flex justify-center pointer-events-none animate-pulse">
               <div className="bg-red-600/80 text-white text-xs font-bold px-3 py-1 rounded-full">

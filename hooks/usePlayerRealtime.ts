@@ -22,16 +22,18 @@ function sortByJoinedAt(players: Player[]): Player[] {
 }
 
 export function usePlayerRealtime(
-  gameId: string,
-  onHpChange?: (playerId: string, newHp: number, oldHp: number) => void
+  gameId:      string,
+  onHpChange?: (playerId: string, newHp: number, oldHp: number) => void,
+  /** プレイヤーが倒されたときに呼ばれる */
+  onKill?:     (victimName: string, killerName: string) => void,
 ) {
   const [players, setPlayers] = useState<Player[]>([])
   const [realtimeStatus, setRealtimeStatus] = useState<RealtimeStatus>('connecting')
 
   const onHpChangeRef = useRef(onHpChange)
-  useEffect(() => {
-    onHpChangeRef.current = onHpChange
-  })
+  const onKillRef     = useRef(onKill)
+  useEffect(() => { onHpChangeRef.current = onHpChange })
+  useEffect(() => { onKillRef.current     = onKill     })
 
   useEffect(() => {
     if (!gameId) return
@@ -57,10 +59,16 @@ export function usePlayerRealtime(
           }
           if (payload.eventType === 'UPDATE') {
             const updated = payload.new as Player
-            const old = payload.old as Partial<Player>
+            const old     = payload.old as Partial<Player>
             setPlayers((prev) => prev.map((p) => (p.id === updated.id ? updated : p)))
+
+            // HP 減少コールバック
             if (old.hp !== undefined && updated.hp < old.hp) {
               onHpChangeRef.current?.(updated.id, updated.hp, old.hp)
+            }
+            // キル検知（is_alive: true → false）
+            if (old.is_alive !== false && updated.is_alive === false) {
+              onKillRef.current?.(updated.name, updated.killer_name ?? '???')
             }
           }
           if (payload.eventType === 'DELETE') {
@@ -72,9 +80,7 @@ export function usePlayerRealtime(
         setRealtimeStatus(toRealtimeStatus(status))
       })
 
-    return () => {
-      supabase.removeChannel(channel)
-    }
+    return () => { supabase.removeChannel(channel) }
   }, [gameId])
 
   return { players, realtimeStatus }

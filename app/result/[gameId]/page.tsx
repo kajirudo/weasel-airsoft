@@ -1,6 +1,6 @@
 import { createServerClient } from '@/lib/supabase/server'
 import Link from 'next/link'
-import type { QrCodeId } from '@/types/database'
+import type { QrCodeId, Team } from '@/types/database'
 import { RematchSection } from './RematchSection'
 
 const QR_LABELS: Record<QrCodeId, string> = {
@@ -22,6 +22,8 @@ export default async function ResultPage({ params }: ResultPageProps) {
     .eq('id', gameId)
     .single()
 
+  const TEAM_BADGE: Record<Team, string> = { none: '', red: '🔴', blue: '🔵' }
+
   // joined_at 順で取得 → players[0] がホスト
   const { data: players } = await supabase
     .from('players')
@@ -30,6 +32,7 @@ export default async function ResultPage({ params }: ResultPageProps) {
     .order('joined_at', { ascending: true })
 
   const winner     = game?.winner as { name: string; qr_code_id: string } | null
+  const winnerTeam = game?.winner_team ?? null
   const hostPlayer = players?.[0]
 
   // スコア表示は kills 降順 → hp 降順
@@ -54,7 +57,14 @@ export default async function ResultPage({ params }: ResultPageProps) {
         {/* 勝者発表 */}
         <div className="text-center space-y-2">
           <p className="text-gray-500 text-xs uppercase tracking-widest">GAME OVER</p>
-          {winner ? (
+          {winnerTeam ? (
+            <>
+              <p className={`font-black text-5xl ${winnerTeam === 'red' ? 'text-red-400' : 'text-blue-400'}`}>
+                {winnerTeam === 'red' ? '🔴 赤チーム' : '🔵 青チーム'}
+              </p>
+              <p className="text-white text-xl font-bold">の勝利！🏆</p>
+            </>
+          ) : winner ? (
             <>
               <p className="text-yellow-400 font-black text-5xl">{winner.name}</p>
               <p className="text-white text-xl font-bold">の勝利！🏆</p>
@@ -90,6 +100,9 @@ export default async function ResultPage({ params }: ResultPageProps) {
                   <span className="text-gray-500 text-sm">{i + 1}</span>
                   <div className="flex items-center gap-1.5 min-w-0">
                     {isWinner && <span className="text-yellow-400 text-sm flex-shrink-0">👑</span>}
+                    {p.team !== 'none' && (
+                      <span className="flex-shrink-0">{TEAM_BADGE[p.team as Team]}</span>
+                    )}
                     <span className="text-white font-medium truncate">{p.name}</span>
                   </div>
                   <span className={`text-sm font-mono text-center ${p.is_alive ? 'text-green-400' : 'text-red-400'}`}>
