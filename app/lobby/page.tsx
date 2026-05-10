@@ -12,6 +12,13 @@ export default function LobbyPage() {
         </div>
 
         <LobbyForm />
+
+        <a
+          href="/qr"
+          className="text-gray-600 hover:text-gray-400 text-xs underline underline-offset-2 transition-colors"
+        >
+          QRコード印刷ページ →
+        </a>
       </div>
     </div>
   )
