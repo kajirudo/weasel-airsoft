@@ -1,4 +1,5 @@
-import { LobbyForm } from '@/components/lobby/LobbyForm'
+import { LobbyForm }        from '@/components/lobby/LobbyForm'
+import { TutorialOverlay }  from '@/components/lobby/TutorialOverlay'
 
 export default function LobbyPage() {
   return (
@@ -20,6 +21,9 @@ export default function LobbyPage() {
           QRコード印刷ページ →
         </a>
       </div>
+
+      {/* 初回のみ表示されるチュートリアル */}
+      <TutorialOverlay />
     </div>
   )
 }

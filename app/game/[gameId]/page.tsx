@@ -26,7 +26,8 @@ import { useGameTimer }          from '@/hooks/useGameTimer'
 import { useCountdown }          from '@/hooks/useCountdown'
 import { useGameChat }           from '@/hooks/useGameChat'
 import { useKillcam }            from '@/hooks/useKillcam'
-import { registerHit, startGame, finishGameByTimeout } from '@/lib/game/actions'
+import { registerHit, startGame, finishGameByTimeout, saveKillcamUrl } from '@/lib/game/actions'
+import { isHostPlayer } from '@/lib/game/utils'
 import { compositeKillcam }      from '@/lib/game/killcam-capture'
 import { createClient }          from '@/lib/supabase/client'
 import { MAX_HP, HIT_DAMAGE, STICKY_GRACE_MS, AUTO_FIRE_HOLD_MS } from '@/lib/game/constants'
@@ -133,7 +134,7 @@ export default function GamePage() {
   // タイマー
   const isHostRef = useRef(false)
   const selfPlayer: Player | undefined = players.find((p) => p.id === session?.playerId)
-  const isHost     = players.length > 0 && players[0].id === session?.playerId
+  const isHost     = isHostPlayer(players, session?.playerId)
   isHostRef.current = isHost
 
   const { remainingSeconds } = useGameTimer({
@@ -224,13 +225,22 @@ export default function GamePage() {
 
         const { data: urlData } = supabase.storage.from('killcam').getPublicUrl(path)
 
-        // Broadcast で対象プレイヤーに配信
-        await sendKillcam({
+        const killcamPayload = {
           imageUrl:       urlData.publicUrl,
           shooterName:    session.name,
           timestamp:      new Date().toISOString(),
           targetPlayerId: targetPlayer.id,
-        })
+        }
+
+        // Broadcast（即時表示）と DB 保存（リザルト画面用）を並列実行
+        await Promise.all([
+          sendKillcam(killcamPayload),
+          saveKillcamUrl({
+            targetPlayerId: targetPlayer.id,
+            gameId,
+            url:            urlData.publicUrl,
+          }),
+        ])
       } catch {
         // キルカムの失敗はゲームプレイに影響しないため無視
       }

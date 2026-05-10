@@ -15,7 +15,7 @@ import { createGame, joinGame, startGame, registerHit } from '@/lib/game/actions
 import { usePlayerRealtime } from '@/hooks/usePlayerRealtime'
 import { useGameRealtime }   from '@/hooks/useGameRealtime'
 import { useHeartbeat }      from '@/hooks/useHeartbeat'
-import { MAX_HP }            from '@/lib/game/constants'
+import { MAX_HP, QR_LABELS }  from '@/lib/game/constants'
 import type { LocalPlayerSession } from '@/types/game'
 import type { Player, QrCodeId }  from '@/types/database'
 
@@ -25,10 +25,6 @@ function getOrCreateDeviceId(): string {
   let id = localStorage.getItem(key)
   if (!id) { id = crypto.randomUUID(); localStorage.setItem(key, id) }
   return id
-}
-
-const QR_LABELS: Record<QrCodeId, string> = {
-  player_1: 'P1', player_2: 'P2', player_3: 'P3', player_4: 'P4', player_5: 'P5', player_6: 'P6',
 }
 
 function HpBar({ hp }: { hp: number }) {

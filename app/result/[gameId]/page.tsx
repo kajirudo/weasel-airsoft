@@ -1,12 +1,8 @@
 import { createServerClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import type { QrCodeId, Team } from '@/types/database'
+import { QR_LABELS } from '@/lib/game/constants'
 import { RematchSection } from './RematchSection'
-
-const QR_LABELS: Record<QrCodeId, string> = {
-  player_1: 'P1', player_2: 'P2', player_3: 'P3',
-  player_4: 'P4', player_5: 'P5', player_6: 'P6',
-}
 
 interface ResultPageProps {
   params: Promise<{ gameId: string }>
@@ -39,6 +35,9 @@ export default async function ResultPage({ params }: ResultPageProps) {
   const sortedPlayers = [...(players ?? [])].sort(
     (a, b) => b.kills - a.kills || b.hp - a.hp
   )
+
+  // キルカム証拠写真（killcam_url がある = 撃たれたプレイヤー）
+  const killcamPlayers = (players ?? []).filter((p) => p.killcam_url)
 
   const duration =
     game?.started_at && game?.finished_at
@@ -120,9 +119,43 @@ export default async function ResultPage({ params }: ResultPageProps) {
           </div>
         )}
 
+        {/* ── キルカム証拠写真 ── */}
+        {killcamPlayers.length > 0 && (
+          <div className="w-full space-y-3">
+            <p className="text-gray-500 text-xs uppercase tracking-widest text-center">
+              📸 証拠写真
+            </p>
+            <div className="space-y-3">
+              {killcamPlayers.map((p) => (
+                <div key={p.id} className="bg-gray-900 rounded-xl overflow-hidden border border-gray-800">
+                  {/* ヘッダー */}
+                  <div className="flex items-center justify-between px-3 py-2 bg-gray-800">
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <span className="text-gray-400 font-mono">{QR_LABELS[p.qr_code_id as QrCodeId]}</span>
+                      <span className="text-white font-semibold">{p.name}</span>
+                      <span className="text-gray-500">が</span>
+                    </div>
+                    <div className="flex items-center gap-1 text-xs text-red-400 font-bold">
+                      <span>{p.killer_name ?? '—'}</span>
+                      <span className="text-gray-500">に倒される</span>
+                    </div>
+                  </div>
+
+                  {/* 証拠写真 */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={p.killcam_url!}
+                    alt={`${p.name} のキルカム`}
+                    className="w-full h-auto block"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* アクション */}
         <div className="w-full flex flex-col gap-3">
-          {/* リマッチ UI（ホスト/非ホストで表示が変わる） */}
           {hostPlayer && (
             <RematchSection
               gameId={gameId}
@@ -130,7 +163,6 @@ export default async function ResultPage({ params }: ResultPageProps) {
               initialNextGameId={game?.next_game_id ?? null}
             />
           )}
-
           <Link
             href="/lobby"
             className="w-full text-center bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium py-2.5 rounded-xl transition-colors text-sm"

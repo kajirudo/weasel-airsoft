@@ -174,3 +174,33 @@ export async function registerHit(params: {
   }
 }
 
+/**
+ * キルカム画像の URL をプレイヤーレコードに保存する。
+ * - gameId × targetPlayerId でプレイヤーの存在を検証（#9 バリデーション）
+ * - リザルト画面での証拠写真表示に使用
+ */
+export async function saveKillcamUrl(params: {
+  targetPlayerId: string
+  gameId:         string
+  url:            string
+}): Promise<void> {
+  const { targetPlayerId, gameId, url } = params
+  const supabase = createServerClient()
+
+  // バリデーション: そのゲームに所属するプレイヤーか確認
+  const { data: player, error: findError } = await supabase
+    .from('players')
+    .select('id')
+    .eq('id', targetPlayerId)
+    .eq('game_id', gameId)
+    .single()
+
+  if (findError || !player) return  // 不正な呼び出しは無視
+
+  await supabase
+    .from('players')
+    .update({ killcam_url: url })
+    .eq('id', targetPlayerId)
+    .eq('game_id', gameId)
+}
+

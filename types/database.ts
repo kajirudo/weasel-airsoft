@@ -32,4 +32,5 @@ export interface Player {
   kills:        number
   team:         Team
   killer_name:  string | null
+  killcam_url:  string | null
 }

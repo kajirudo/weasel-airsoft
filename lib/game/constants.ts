@@ -18,3 +18,17 @@ export const QR_CODE_IDS: QrCodeId[] = [
   'player_5',
   'player_6',
 ]
+
+export const QR_LABELS: Record<QrCodeId, string> = {
+  player_1: 'P1', player_2: 'P2', player_3: 'P3',
+  player_4: 'P4', player_5: 'P5', player_6: 'P6',
+}
+
+export const QR_COLORS: Record<QrCodeId, string> = {
+  player_1: '#ef4444',
+  player_2: '#3b82f6',
+  player_3: '#22c55e',
+  player_4: '#f59e0b',
+  player_5: '#a855f7',
+  player_6: '#ec4899',
+}

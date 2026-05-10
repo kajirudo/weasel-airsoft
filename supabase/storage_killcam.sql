@@ -36,14 +36,12 @@ create policy "killcam: public read"
 -- 4. DELETE は禁止（cleanup は cron のみ）
 
 -- 5. 古い killcam 画像の自動削除（pg_cron が有効な場合）
---    以下のコメントを外して実行してください:
---
--- select cron.schedule(
---   'cleanup-killcam',
---   '0 3 * * *',
---   $$
---     delete from storage.objects
---     where bucket_id = 'killcam'
---       and created_at < now() - interval '24 hours';
---   $$
--- );
+select cron.schedule(
+  'cleanup-killcam',
+  '0 3 * * *',
+  $$
+    delete from storage.objects
+    where bucket_id = 'killcam'
+      and created_at < now() - interval '24 hours';
+  $$
+);

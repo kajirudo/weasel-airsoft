@@ -1,26 +1,8 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
-import { QR_CODE_IDS } from '@/lib/game/constants'
+import { QR_CODE_IDS, QR_LABELS, QR_COLORS } from '@/lib/game/constants'
 import type { QrCodeId } from '@/types/database'
-
-const LABELS: Record<QrCodeId, string> = {
-  player_1: 'PLAYER 1',
-  player_2: 'PLAYER 2',
-  player_3: 'PLAYER 3',
-  player_4: 'PLAYER 4',
-  player_5: 'PLAYER 5',
-  player_6: 'PLAYER 6',
-}
-
-const COLORS: Record<QrCodeId, string> = {
-  player_1: '#ef4444',
-  player_2: '#3b82f6',
-  player_3: '#22c55e',
-  player_4: '#f59e0b',
-  player_5: '#a855f7',
-  player_6: '#ec4899',
-}
 
 // ── 1プレイヤー分のカード ─────────────────────────────────────────────────────
 function PlayerCard({
@@ -221,8 +203,8 @@ export default function QRPage() {
             <PlayerCard
               key={id}
               id={id}
-              label={LABELS[id]}
-              color={COLORS[id]}
+              label={QR_LABELS[id]}
+              color={QR_COLORS[id]}
               isLast={i === QR_CODE_IDS.length - 1}
             />
           ))}
