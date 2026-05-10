@@ -137,7 +137,7 @@ export function DebugClient() {
     if (!session) return
     setStarting(true)
     try {
-      await startGame({ gameId: session.gameId, hitDamage: 25, shootCooldown: 800 })
+      await startGame({ gameId: session.gameId, hitDamage: 25, shootCooldown: 800, durationMinutes: 0 })
       addLog('ゲーム開始')
     } catch (e) {
       addLog(`開始失敗: ${e instanceof Error ? e.message : 'エラー'}`)

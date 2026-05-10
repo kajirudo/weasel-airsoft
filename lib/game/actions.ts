@@ -5,7 +5,7 @@ import { QR_CODE_IDS } from '@/lib/game/constants'
 import type { QrCodeId } from '@/types/database'
 
 // ─── Short code generator ──────────────────────────────────────────────────────
-// Avoids ambiguous chars: 0/O, 1/I/l → 32 symbols → 32^6 ≈ 1 billion codes
+// 紛らわしい文字（0/O, 1/I/l）を除外した32文字 → 32^6 ≈ 10億通り
 const SHORT_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 
 function generateShortCode(): string {
@@ -17,7 +17,6 @@ function generateShortCode(): string {
 export async function createGame(): Promise<{ gameId: string; shortCode: string }> {
   const supabase = createServerClient()
 
-  // Retry on the (astronomically rare) unique-code collision
   for (let attempt = 0; attempt < 5; attempt++) {
     const shortCode = generateShortCode()
     const { data, error } = await supabase
@@ -28,13 +27,12 @@ export async function createGame(): Promise<{ gameId: string; shortCode: string 
 
     if (!error && data) return { gameId: data.id, shortCode: data.short_code as string }
     if (error?.code !== '23505') throw new Error('ゲームの作成に失敗しました')
-    // 23505 = unique violation → retry with new code
   }
 
   throw new Error('ゲームの作成に失敗しました')
 }
 
-/** gameId may be a full UUID *or* a 6-char short code */
+/** gameId には UUID または 6文字ショートコードの両方を受け付ける */
 export async function joinGame(params: {
   gameId: string
   name: string
@@ -43,7 +41,7 @@ export async function joinGame(params: {
   const supabase = createServerClient()
   let resolvedGameId = params.gameId.trim()
 
-  // Resolve short code → UUID
+  // 6文字ショートコード → UUID に解決
   if (resolvedGameId.length !== 36) {
     const { data: found, error } = await supabase
       .from('games')
@@ -103,17 +101,19 @@ export async function startGame(params: {
   gameId: string
   hitDamage: number
   shootCooldown: number
+  durationMinutes: number
 }): Promise<void> {
-  const { gameId, hitDamage, shootCooldown } = params
+  const { gameId, hitDamage, shootCooldown, durationMinutes } = params
   const supabase = createServerClient()
 
   const { error } = await supabase
     .from('games')
     .update({
-      status:         'active',
-      started_at:     new Date().toISOString(),
-      hit_damage:     hitDamage,
-      shoot_cooldown: shootCooldown,
+      status:           'active',
+      started_at:       new Date().toISOString(),
+      hit_damage:       hitDamage,
+      shoot_cooldown:   shootCooldown,
+      duration_minutes: durationMinutes,
     })
     .eq('id', gameId)
     .eq('status', 'lobby')
@@ -121,10 +121,73 @@ export async function startGame(params: {
   if (error) throw new Error('ゲーム開始に失敗しました')
 }
 
+/**
+ * リマッチ：新しいゲームを作成し、旧ゲームに next_game_id をセットする。
+ * ホストのクライアントが呼び出す。参加は joinGame を別途呼ぶ。
+ */
+export async function createRematch(params: {
+  prevGameId: string
+}): Promise<{ gameId: string; shortCode: string }> {
+  const supabase = createServerClient()
+
+  // 1. 新しいゲームを作成
+  const { gameId, shortCode } = await createGame()
+
+  // 2. 旧ゲームに next_game_id を記録（他プレイヤーへの通知トリガー）
+  await supabase
+    .from('games')
+    .update({ next_game_id: gameId })
+    .eq('id', params.prevGameId)
+
+  return { gameId, shortCode }
+}
+
+/**
+ * クイックマッチ：空きのあるロビーゲームを自動検索して参加。
+ * 空きがなければ新規ゲームを作成して参加。
+ */
+export async function quickMatch(params: {
+  name: string
+  deviceId: string
+}): Promise<{ playerId: string; qrCodeId: QrCodeId; gameId: string }> {
+  const supabase = createServerClient()
+  const { name, deviceId } = params
+
+  // 最近作成されたロビーゲームを最大5件取得
+  const { data: candidates } = await supabase
+    .from('games')
+    .select('id')
+    .eq('status', 'lobby')
+    .order('created_at', { ascending: false })
+    .limit(5)
+
+  for (const game of candidates ?? []) {
+    try {
+      return await joinGame({ gameId: game.id, name, deviceId })
+    } catch {
+      // 満員 or 開始済み → 次を試す
+      continue
+    }
+  }
+
+  // 空き無し → 新規ゲームを作成して参加
+  const { gameId: newGameId } = await createGame()
+  return await joinGame({ gameId: newGameId, name, deviceId })
+}
+
+export async function finishGameByTimeout(params: { gameId: string }): Promise<void> {
+  const supabase = createServerClient()
+  const { error } = await supabase.rpc('finish_game_by_timeout', {
+    p_game_id: params.gameId,
+  })
+  if (error) throw new Error('タイムアウト処理に失敗しました')
+}
+
 interface HitResult {
   newHp: number
   gameOver: boolean
   winnerId?: string
+  throttled?: boolean
 }
 
 export async function registerHit(params: {
@@ -152,8 +215,9 @@ export async function registerHit(params: {
   }
 
   return {
-    newHp:    data.newHp,
-    gameOver: data.gameOver,
-    winnerId: data.winnerId ?? undefined,
+    newHp:     data.newHp,
+    gameOver:  data.gameOver,
+    winnerId:  data.winnerId ?? undefined,
+    throttled: data.throttled ?? false,
   }
 }

@@ -31,7 +31,12 @@ export function HpOverlay({ selfPlayer, allPlayers }: HpOverlayProps) {
       {/* 自分のHP — 左下 */}
       <div className="absolute bottom-8 left-4 pointer-events-none">
         <div className="bg-black/60 rounded-xl px-3 py-2 backdrop-blur-sm min-w-[140px]">
-          <p className="text-white text-xs font-bold mb-1 truncate max-w-[120px]">{selfPlayer.name}</p>
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-white text-xs font-bold truncate max-w-[100px]">{selfPlayer.name}</p>
+            {selfPlayer.kills > 0 && (
+              <span className="text-yellow-400 text-xs font-mono ml-2">💀{selfPlayer.kills}</span>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             <div className="flex-1 h-3 bg-gray-700 rounded-full overflow-hidden">
               <div
@@ -46,19 +51,25 @@ export function HpOverlay({ selfPlayer, allPlayers }: HpOverlayProps) {
 
       {/* 相手のHP一覧 — 右上 */}
       {enemies.length > 0 && (
-        <div className="absolute top-4 right-4 pointer-events-none flex flex-col gap-2">
+        <div className="absolute top-16 right-4 pointer-events-none flex flex-col gap-2">
           {enemies.map((p) => (
-            <div key={p.id} className={`bg-black/60 rounded-lg px-2 py-1 backdrop-blur-sm ${!p.is_alive ? 'opacity-40' : ''}`}>
-              <div className="flex items-center gap-2">
+            <div
+              key={p.id}
+              className={`bg-black/60 rounded-lg px-2 py-1 backdrop-blur-sm ${!p.is_alive ? 'opacity-40' : ''}`}
+            >
+              <div className="flex items-center gap-1.5">
                 <span className="text-xs font-mono text-gray-400">{QR_LABELS[p.qr_code_id]}</span>
-                <span className="text-white text-xs truncate max-w-[60px]">{p.name}</span>
-                <div className="w-16 h-2 bg-gray-700 rounded-full overflow-hidden">
+                <span className="text-white text-xs truncate max-w-[56px]">{p.name}</span>
+                {p.kills > 0 && (
+                  <span className="text-yellow-400 text-xs font-mono">💀{p.kills}</span>
+                )}
+                <div className="w-14 h-2 bg-gray-700 rounded-full overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all duration-300 ${hpColor(p.hp)}`}
                     style={{ width: `${(p.hp / MAX_HP) * 100}%` }}
                   />
                 </div>
-                <span className="text-xs font-mono text-white w-6 text-right">{p.hp}</span>
+                <span className="text-xs font-mono text-white w-5 text-right">{p.hp}</span>
               </div>
             </div>
           ))}

@@ -2,20 +2,24 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { CameraView }       from '@/components/game/CameraView'
-import { HpOverlay }        from '@/components/game/HpOverlay'
-import { HitFlash }         from '@/components/game/HitFlash'
-import { ConnectionWarning } from '@/components/game/ConnectionWarning'
-import { Button }           from '@/components/ui/Button'
-import { ShareGameId }      from '@/components/lobby/ShareGameId'
-import { GameSettings }     from '@/components/lobby/GameSettings'
-import { usePlayerRealtime } from '@/hooks/usePlayerRealtime'
-import { useGameRealtime }  from '@/hooks/useGameRealtime'
-import { useHitEffect }     from '@/hooks/useHitEffect'
-import { useWakeLock }      from '@/hooks/useWakeLock'
-import { useHeartbeat }     from '@/hooks/useHeartbeat'
-import { registerHit, startGame } from '@/lib/game/actions'
-import { MAX_HP, HIT_DAMAGE }     from '@/lib/game/constants'
+import { CameraView }         from '@/components/game/CameraView'
+import { HpOverlay }          from '@/components/game/HpOverlay'
+import { HitFlash }           from '@/components/game/HitFlash'
+import { ConnectionWarning }  from '@/components/game/ConnectionWarning'
+import { SpectatorView }      from '@/components/game/SpectatorView'
+import { TimerDisplay }       from '@/components/game/TimerDisplay'
+import { Button }             from '@/components/ui/Button'
+import { ShareGameId }        from '@/components/lobby/ShareGameId'
+import { GameSettings }       from '@/components/lobby/GameSettings'
+import { usePlayerRealtime }  from '@/hooks/usePlayerRealtime'
+import { useGameRealtime }    from '@/hooks/useGameRealtime'
+import { useHitEffect }       from '@/hooks/useHitEffect'
+import { useWakeLock }        from '@/hooks/useWakeLock'
+import { useHeartbeat }       from '@/hooks/useHeartbeat'
+import { useSound }           from '@/hooks/useSound'
+import { useGameTimer }       from '@/hooks/useGameTimer'
+import { registerHit, startGame, finishGameByTimeout } from '@/lib/game/actions'
+import { MAX_HP, HIT_DAMAGE }  from '@/lib/game/constants'
 import type { DetectedQR, LocalPlayerSession } from '@/types/game'
 import type { Player } from '@/types/database'
 
@@ -29,28 +33,30 @@ export default function GamePage() {
   const [detectedQR, setDetectedQR]   = useState<DetectedQR | null>(null)
   const [isStarting, setIsStarting]   = useState(false)
   const [balanceSettings, setBalance] = useState({
-    hitDamage:     HIT_DAMAGE,
-    shootCooldown: DEFAULT_SHOOT_COOLDOWN,
+    hitDamage:       HIT_DAMAGE,
+    shootCooldown:   DEFAULT_SHOOT_COOLDOWN,
+    durationMinutes: 0,
   })
   const lastShotRef = useRef(0)
 
   useWakeLock()
 
   const { isFlashing, triggerFlash } = useHitEffect()
+  const { playShot, playHit, playKill, playTimeout } = useSound()
 
   const handleHpChange = useCallback(
     (playerId: string, _newHp: number, _oldHp: number) => {
-      if (session && playerId === session.playerId) triggerFlash()
+      if (session && playerId === session.playerId) {
+        triggerFlash()
+        playHit()
+      }
     },
-    [session, triggerFlash]
+    [session, triggerFlash, playHit]
   )
 
   const { players, realtimeStatus: playerStatus } = usePlayerRealtime(gameId, handleHpChange)
   const { game,    realtimeStatus: gameStatus   } = useGameRealtime(gameId)
 
-  // ─── ハートビート ───────────────────────────────────────────────────────────
-  // 5秒ごとに mark_player_seen RPC を呼び出し、自分の生存を報告。
-  // 15秒応答がない他プレイヤーは自動失格（DB側で処理）。
   useHeartbeat({
     gameId,
     playerId:   session?.playerId,
@@ -65,6 +71,7 @@ export default function GamePage() {
   })()
   const isOffline = worstStatus !== 'connected'
 
+  // ─── セッション復元 ─────────────────────────────────────────────────────────
   useEffect(() => {
     const raw = sessionStorage.getItem('weasel_session')
     if (!raw) { router.replace('/lobby'); return }
@@ -73,8 +80,29 @@ export default function GamePage() {
     setSession(s)
   }, [gameId, router])
 
+  // ─── ゲームタイマー ─────────────────────────────────────────────────────────
+  const isHostRef = useRef(false)
+  const selfPlayer: Player | undefined = players.find((p) => p.id === session?.playerId)
+  const isHost     = players.length > 0 && players[0].id === session?.playerId
+  isHostRef.current = isHost
+
+  const { remainingSeconds } = useGameTimer({
+    startedAt:       game?.started_at ?? null,
+    durationMinutes: game?.duration_minutes ?? 0,
+    status:          game?.status,
+    onExpire: async () => {
+      // タイムアウト音は全員に鳴らす
+      playTimeout()
+      // DB 更新はホストだけが実行（冪等なのでどちらでも安全だが通知を抑える）
+      if (isHostRef.current) {
+        try { await finishGameByTimeout({ gameId }) } catch { /* already finished */ }
+      }
+    },
+  })
+
   const shootCooldown = game?.shoot_cooldown ?? DEFAULT_SHOOT_COOLDOWN
 
+  // ─── 射撃ハンドラ ───────────────────────────────────────────────────────────
   const handleShoot = useCallback(async () => {
     if (!session || !detectedQR?.isInReticle) return
     if (detectedQR.qrCodeId === session.qrCodeId) return
@@ -85,32 +113,42 @@ export default function GamePage() {
     lastShotRef.current = now
 
     try {
-      await registerHit({
+      const result = await registerHit({
         gameId,
         shooterPlayerId: session.playerId,
         shooterDeviceId: session.deviceId,
         targetQrCodeId:  detectedQR.qrCodeId,
       })
+      if (!result.throttled) {
+        if (result.gameOver) {
+          playKill()
+        } else if (result.newHp < (selfPlayer?.hp ?? MAX_HP)) {
+          // ダメージが入った
+          playShot()
+        } else {
+          playShot()
+        }
+      }
     } catch { /* 無視 */ }
-  }, [session, detectedQR, gameId, shootCooldown, isOffline])
+  }, [session, detectedQR, gameId, shootCooldown, isOffline, playShot, playKill, selfPlayer?.hp])
 
   const handleStartGame = async () => {
     setIsStarting(true)
     try {
       await startGame({
         gameId,
-        hitDamage:     balanceSettings.hitDamage,
-        shootCooldown: balanceSettings.shootCooldown,
+        hitDamage:       balanceSettings.hitDamage,
+        shootCooldown:   balanceSettings.shootCooldown,
+        durationMinutes: balanceSettings.durationMinutes,
       })
     } catch {
       setIsStarting(false)
     }
   }
 
-  const selfPlayer: Player | undefined = players.find((p) => p.id === session?.playerId)
-  const isHost   = players.length > 0 && players[0].id === session?.playerId
   const isLobby  = game?.status === 'lobby'
   const isActive = game?.status === 'active'
+  const isDead   = selfPlayer && !selfPlayer.is_alive
 
   if (!session) {
     return (
@@ -122,20 +160,31 @@ export default function GamePage() {
 
   return (
     <div className="fixed inset-0 bg-black overflow-hidden">
-      {/* カメラ + レティクル（offline 時は × マーク） */}
-      <CameraView
-        onQRDetected={setDetectedQR}
-        onShoot={handleShoot}
-        isInReticle={detectedQR?.isInReticle ?? false}
-        offline={isOffline}
-      />
 
-      <HitFlash isFlashing={isFlashing} />
+      {/* ─── スペクテイターモード（死亡時） ─────────────────────────────── */}
+      {isDead && isActive && selfPlayer ? (
+        <SpectatorView players={players} selfPlayer={selfPlayer} />
+      ) : (
+        <>
+          {/* カメラ + レティクル */}
+          <CameraView
+            onQRDetected={setDetectedQR}
+            onShoot={handleShoot}
+            isInReticle={detectedQR?.isInReticle ?? false}
+            offline={isOffline}
+          />
 
-      {/* 接続状態バナー */}
+          <HitFlash isFlashing={isFlashing} />
+
+          {/* タイマー */}
+          {isActive && <TimerDisplay remainingSeconds={remainingSeconds} />}
+
+          {selfPlayer && <HpOverlay selfPlayer={selfPlayer} allPlayers={players} />}
+        </>
+      )}
+
+      {/* 接続状態バナー（スペクテイター中も表示） */}
       <ConnectionWarning status={worstStatus} />
-
-      {selfPlayer && <HpOverlay selfPlayer={selfPlayer} allPlayers={players} />}
 
       {/* ─── ロビー中 ────────────────────────────────────────────────────── */}
       {isLobby && (
@@ -149,6 +198,7 @@ export default function GamePage() {
               <GameSettings
                 hitDamage={balanceSettings.hitDamage}
                 shootCooldown={balanceSettings.shootCooldown}
+                durationMinutes={balanceSettings.durationMinutes}
                 onChange={setBalance}
               />
             </div>
@@ -174,8 +224,8 @@ export default function GamePage() {
         </div>
       )}
 
-      {/* ─── ゲーム中 ────────────────────────────────────────────────────── */}
-      {isActive && (
+      {/* ─── ゲーム中（生存時） ──────────────────────────────────────────── */}
+      {isActive && !isDead && (
         <>
           {detectedQR && !detectedQR.isInReticle && !isOffline && (
             <div className="absolute bottom-24 left-0 right-0 flex justify-center pointer-events-none">

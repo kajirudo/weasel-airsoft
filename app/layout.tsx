@@ -3,15 +3,22 @@ import './globals.css'
 
 export const metadata: Metadata = {
   title: 'Weasel Airsoft',
-  description: 'AR Laser Tag Game',
+  description: 'AR レーザータグゲーム',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'Weasel',
+  },
 }
 
 export const viewport: Viewport = {
-  width: 'device-width',
-  initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
-  viewportFit: 'cover',
+  width:            'device-width',
+  initialScale:     1,
+  maximumScale:     1,
+  userScalable:     false,
+  viewportFit:      'cover',
+  themeColor:       '#000000',
 }
 
 // 必須環境変数

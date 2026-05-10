@@ -11,6 +11,8 @@ export interface Game {
   hit_damage: number
   shoot_cooldown: number
   short_code: string | null
+  duration_minutes: number
+  next_game_id: string | null
 }
 
 export interface Player {
@@ -23,4 +25,6 @@ export interface Player {
   is_alive: boolean
   joined_at: string
   last_seen: string
+  last_shot_at: string | null
+  kills: number
 }
