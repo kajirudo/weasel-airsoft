@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/kajir/Desktop/AIworks/projects/**)",
+      "Bash(npx create-next-app@latest weasel-airsoft --typescript --tailwind --app --no-src-dir --import-alias \"@/*\" --yes)"
+    ]
+  }
+}
