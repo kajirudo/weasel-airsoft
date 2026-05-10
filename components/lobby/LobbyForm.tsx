@@ -21,14 +21,15 @@ function saveSession(session: LocalPlayerSession) {
 }
 
 interface LobbyFormProps {
-  gameId?: string
+  /** 6-char short code OR full UUID. Pre-fills the join field. */
+  initialCode?: string
 }
 
-export function LobbyForm({ gameId: initialGameId }: LobbyFormProps) {
+export function LobbyForm({ initialCode }: LobbyFormProps) {
   const router = useRouter()
   const [name, setName] = useState('')
-  const [gameId, setGameId] = useState(initialGameId ?? '')
-  const [mode, setMode] = useState<'select' | 'join'>('select')
+  const [code, setCode] = useState(initialCode ?? '')
+  const [mode, setMode] = useState<'select' | 'join'>(initialCode ? 'join' : 'select')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -38,10 +39,10 @@ export function LobbyForm({ gameId: initialGameId }: LobbyFormProps) {
     setError(null)
     try {
       const deviceId = getOrCreateDeviceId()
-      const { gameId: newGameId } = await createGame()
-      const { playerId, qrCodeId } = await joinGame({ gameId: newGameId, name: name.trim(), deviceId })
-      saveSession({ deviceId, playerId, gameId: newGameId, qrCodeId, name: name.trim() })
-      router.push(`/game/${newGameId}`)
+      const { gameId } = await createGame()
+      const { playerId, qrCodeId } = await joinGame({ gameId, name: name.trim(), deviceId })
+      saveSession({ deviceId, playerId, gameId, qrCodeId, name: name.trim() })
+      router.push(`/game/${gameId}`)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'エラーが発生しました')
       setLoading(false)
@@ -50,14 +51,18 @@ export function LobbyForm({ gameId: initialGameId }: LobbyFormProps) {
 
   async function handleJoin() {
     if (!name.trim()) return setError('名前を入力してください')
-    if (!gameId.trim()) return setError('ゲームIDを入力してください')
+    if (!code.trim()) return setError('ゲームコードを入力してください')
     setLoading(true)
     setError(null)
     try {
       const deviceId = getOrCreateDeviceId()
-      const { playerId, qrCodeId } = await joinGame({ gameId: gameId.trim(), name: name.trim(), deviceId })
-      saveSession({ deviceId, playerId, gameId: gameId.trim(), qrCodeId, name: name.trim() })
-      router.push(`/game/${gameId.trim()}`)
+      const { playerId, qrCodeId, gameId } = await joinGame({
+        gameId: code.trim(),
+        name: name.trim(),
+        deviceId,
+      })
+      saveSession({ deviceId, playerId, gameId, qrCodeId, name: name.trim() })
+      router.push(`/game/${gameId}`)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'エラーが発生しました')
       setLoading(false)
@@ -72,6 +77,7 @@ export function LobbyForm({ gameId: initialGameId }: LobbyFormProps) {
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') mode === 'join' ? handleJoin() : handleCreate() }}
           placeholder="名前を入力..."
           maxLength={16}
           className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 text-lg outline-none focus:ring-2 focus:ring-green-500"
@@ -92,19 +98,25 @@ export function LobbyForm({ gameId: initialGameId }: LobbyFormProps) {
       {mode === 'join' && (
         <div className="flex flex-col gap-3">
           <div>
-            <label className="block text-sm font-medium text-gray-400 mb-1">ゲームID</label>
+            <label className="block text-sm font-medium text-gray-400 mb-1">
+              ゲームコード
+              <span className="ml-1 text-gray-600 font-normal text-xs">（6文字）</span>
+            </label>
             <input
               type="text"
-              value={gameId}
-              onChange={(e) => setGameId(e.target.value)}
-              placeholder="ゲームIDを入力..."
-              className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 font-mono outline-none focus:ring-2 focus:ring-green-500"
+              value={code}
+              onChange={(e) => setCode(e.target.value.toUpperCase())}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleJoin() }}
+              placeholder="例: AB3X7K"
+              maxLength={36}
+              autoCapitalize="characters"
+              className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 font-mono text-xl tracking-[0.3em] text-center outline-none focus:ring-2 focus:ring-green-500 placeholder-gray-600"
             />
           </div>
           <Button onClick={handleJoin} loading={loading}>
             参加する
           </Button>
-          <Button variant="secondary" onClick={() => setMode('select')}>
+          <Button variant="secondary" onClick={() => { setMode('select'); setCode('') }}>
             戻る
           </Button>
         </div>

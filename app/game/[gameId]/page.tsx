@@ -141,7 +141,7 @@ export default function GamePage() {
       {isLobby && (
         <div className="absolute inset-0 flex flex-col items-center gap-3 px-4 pt-4 pb-8 z-10 overflow-y-auto pointer-events-none">
           <div className="w-full max-w-xs pointer-events-auto">
-            <ShareGameId gameId={gameId} />
+            <ShareGameId gameId={gameId} shortCode={game?.short_code} />
           </div>
 
           {isHost && (

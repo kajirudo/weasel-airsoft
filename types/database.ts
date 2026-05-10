@@ -1,5 +1,5 @@
 export type GameStatus = 'lobby' | 'active' | 'finished'
-export type QrCodeId = 'player_1' | 'player_2' | 'player_3' | 'player_4' | 'player_5'
+export type QrCodeId = 'player_1' | 'player_2' | 'player_3' | 'player_4' | 'player_5' | 'player_6'
 
 export interface Game {
   id: string
@@ -10,6 +10,7 @@ export interface Game {
   winner_id: string | null
   hit_damage: number
   shoot_cooldown: number
+  short_code: string | null
 }
 
 export interface Player {

@@ -28,7 +28,7 @@ function getOrCreateDeviceId(): string {
 }
 
 const QR_LABELS: Record<QrCodeId, string> = {
-  player_1: 'P1', player_2: 'P2', player_3: 'P3', player_4: 'P4', player_5: 'P5',
+  player_1: 'P1', player_2: 'P2', player_3: 'P3', player_4: 'P4', player_5: 'P5', player_6: 'P6',
 }
 
 function HpBar({ hp }: { hp: number }) {
@@ -89,10 +89,10 @@ export function DebugClient() {
     setLoading(true); setError(null)
     try {
       const deviceId = getOrCreateDeviceId()
-      const { gameId: gid }         = await createGame()
-      const { playerId, qrCodeId }  = await joinGame({ gameId: gid, name: nameInput, deviceId })
+      const { gameId: gid, shortCode } = await createGame()
+      const { playerId, qrCodeId }     = await joinGame({ gameId: gid, name: nameInput, deviceId })
       saveSession({ deviceId, playerId, gameId: gid, qrCodeId, name: nameInput })
-      addLog(`ゲーム作成: ${gid.slice(0, 8)}… スロット=${qrCodeId}`)
+      addLog(`ゲーム作成: ${shortCode} (${gid.slice(0, 8)}…) スロット=${qrCodeId}`)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'エラー')
     } finally { setLoading(false) }
@@ -285,7 +285,7 @@ export function DebugClient() {
         <div className="space-y-3">
           <section className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
             <p className="text-xs text-gray-500 uppercase tracking-wider">
-              プレイヤー ({players.length}/5)
+              プレイヤー ({players.length}/6)
             </p>
 
             {players.length === 0 && (

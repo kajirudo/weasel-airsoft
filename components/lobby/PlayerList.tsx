@@ -9,6 +9,7 @@ const QR_LABELS: Record<QrCodeId, string> = {
   player_3: 'P3',
   player_4: 'P4',
   player_5: 'P5',
+  player_6: 'P6',
 }
 
 interface PlayerListProps {
