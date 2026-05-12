@@ -142,6 +142,26 @@ export async function quickMatch(params: {
   return await joinGame({ gameId: newGameId, name, deviceId })
 }
 
+/**
+ * プレイヤー自身の GPS 位置を更新する。
+ * device_id による本人確認あり（不正な playerId では更新されない）。
+ */
+export async function updatePosition(params: {
+  playerId: string
+  deviceId: string
+  lat:      number
+  lng:      number
+  heading:  number
+}): Promise<void> {
+  const { playerId, deviceId, lat, lng, heading } = params
+  const supabase = createServerClient()
+  await supabase
+    .from('players')
+    .update({ lat, lng, heading })
+    .eq('id', playerId)
+    .eq('device_id', deviceId)  // 自分の行のみ更新
+}
+
 export async function finishGameByTimeout(params: { gameId: string }): Promise<void> {
   const supabase = createServerClient()
   const { error } = await supabase.rpc('finish_game_by_timeout', { p_game_id: params.gameId })

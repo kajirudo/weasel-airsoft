@@ -1,87 +1,88 @@
 /**
- * ArUco 4x4_50 マーカーの SVG を生成する。
+ * js-aruco 互換 ArUco マーカー生成
  *
- * ArUco マーカーの構造:
- *   - 外側 1 マス: 常に黒（境界）
- *   - 内側 4×4: データビット（1=白、0=黒）
- *   → 全体 6×6 グリッドを出力
+ * ⚠️ js-aruco は OpenCV 4×4_50 辞書ではなく独自の Hamming 符号形式を使用する。
  *
- * 印刷用ヒント: 白い余白（quiet zone）は印刷用紙の余白で代用するため SVG には含めない。
+ * ── マーカー構造 ──────────────────────────────────────────────────────────────
+ *   7×7 セル（6×6 ではない）
+ *   外周 1 セル幅: 黒ボーダー（必須）
+ *   内側 5×5: Hamming 符号データ（1=白, 0=黒）
+ *
+ * ── Hamming 符号語 ────────────────────────────────────────────────────────────
+ *   各行の 5 ビットは以下のいずれかでなければ認識されない:
+ *     (bit[1], bit[3]) = (0,0) → row = [1, 0, 0, 0, 0]
+ *     (bit[1], bit[3]) = (0,1) → row = [1, 0, 1, 1, 1]
+ *     (bit[1], bit[3]) = (1,0) → row = [0, 1, 0, 0, 1]
+ *     (bit[1], bit[3]) = (1,1) → row = [0, 1, 1, 1, 0]
+ *
+ * ── ID エンコーディング ───────────────────────────────────────────────────────
+ *   ID は 10 ビット（0〜1023）
+ *   bit9 = row0[1], bit8 = row0[3], ..., bit1 = row4[1], bit0 = row4[3]
+ *   （js-aruco の mat2id 関数と同じ順序）
  */
+
+// (b1, b3) ペアに対応する Hamming 符号語（index = b1<<1 | b3）
+const CODEWORDS = [
+  [1, 0, 0, 0, 0],  // (0,0)
+  [1, 0, 1, 1, 1],  // (0,1)
+  [0, 1, 0, 0, 1],  // (1,0)
+  [0, 1, 1, 1, 0],  // (1,1)
+] as const
 
 /**
- * 2バイト（16ビット）から 4×4 のブール格子に変換する。
- * MSB = 左上セル(0,0)、LSB = 右下セル(3,3)（行優先）
- *
- * @returns true = 白セル、false = 黒セル
+ * ArUco ID (0〜1023) から 5×5 データグリッドを生成する。
+ * true = 白セル（1）, false = 黒セル（0）
  */
-function bytesToGrid(byte0: number, byte1: number): boolean[][] {
-  const combined = (byte0 << 8) | byte1  // 16ビット整数
+function idToGrid(id: number): boolean[][] {
   const grid: boolean[][] = []
-
-  for (let row = 0; row < 4; row++) {
-    const rowArr: boolean[] = []
-    for (let col = 0; col < 4; col++) {
-      const bitPos = 15 - (row * 4 + col)   // MSB first
-      rowArr.push(((combined >> bitPos) & 1) === 1)
-    }
-    grid.push(rowArr)
+  for (let i = 0; i < 5; i++) {
+    const b1  = (id >> (9 - 2 * i)) & 1   // bits[i][1] → 上位データビット
+    const b3  = (id >> (8 - 2 * i)) & 1   // bits[i][3] → 下位データビット
+    const cw  = CODEWORDS[(b1 << 1) | b3]
+    grid.push(Array.from(cw, b => b === 1))
   }
-
   return grid
 }
 
 /**
- * ArUco マーカーの SVG 文字列を生成する。
+ * js-aruco 検出器が認識できる 7×7 ArUco マーカーの SVG を生成する。
  *
- * @param byte0   - 辞書データ 1 バイト目
- * @param byte1   - 辞書データ 2 バイト目
- * @param cellPx  - 1マスのピクセルサイズ（デフォルト 40px → 6×40=240px）
+ * @param id     マーカー ID（0〜1023）
+ * @param cellPx 1 セルのピクセルサイズ（デフォルト: 40px → 7×40=280px）
  */
-export function generateArucoSVG(
-  byte0:  number,
-  byte1:  number,
-  cellPx: number = 40,
-): string {
-  const CELLS = 6                      // 6×6 グリッド
+export function generateArucoSVG(id: number, cellPx = 40): string {
+  const CELLS = 7
   const size  = CELLS * cellPx
+  const grid  = idToGrid(id)
 
-  const grid = bytesToGrid(byte0, byte1)
   const rects: string[] = []
-
-  // 背景: 白
-  rects.push(`<rect width="${size}" height="${size}" fill="white"/>`)
 
   for (let row = 0; row < CELLS; row++) {
     for (let col = 0; col < CELLS; col++) {
-      const isBorder = row === 0 || row === CELLS - 1 || col === 0 || col === CELLS - 1
-
-      const isBlack = isBorder
-        ? true                                 // 境界 = 常に黒
-        : !grid[row - 1][col - 1]             // データ: false → 黒
+      const isBorder = row === 0 || row === 6 || col === 0 || col === 6
+      const isBlack  = isBorder ? true : !grid[row - 1][col - 1]
 
       if (isBlack) {
         rects.push(
-          `<rect x="${col * cellPx}" y="${row * cellPx}" width="${cellPx}" height="${cellPx}" fill="black"/>`
+          `<rect x="${col * cellPx}" y="${row * cellPx}"` +
+          ` width="${cellPx}" height="${cellPx}" fill="black"/>`,
         )
       }
     }
   }
 
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg"` +
-    ` width="${size}" height="${size}"` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"` +
     ` viewBox="0 0 ${size} ${size}">` +
+    `<rect width="${size}" height="${size}" fill="white"/>` +
     rects.join('') +
     `</svg>`
   )
 }
 
 /**
- * SVG 文字列を `data:image/svg+xml` の URL に変換する。
- * <img src={...}> に使えるため印刷互換性が高い。
+ * SVG を data:image/svg+xml URL に変換する（`<img src>` で使用可）。
  */
-export function arucoSVGtoDataURL(byte0: number, byte1: number, cellPx?: number): string {
-  const svg = generateArucoSVG(byte0, byte1, cellPx)
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`
+export function arucoSVGtoDataURL(id: number, cellPx = 40): string {
+  return `data:image/svg+xml,${encodeURIComponent(generateArucoSVG(id, cellPx))}`
 }

@@ -35,4 +35,7 @@ export interface Player {
   team:         Team
   killer_name:  string | null
   killcam_url:  string | null
+  lat:          number | null
+  lng:          number | null
+  heading:      number | null
 }

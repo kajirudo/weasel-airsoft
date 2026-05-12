@@ -13,6 +13,7 @@ import { CountdownOverlay }      from '@/components/game/CountdownOverlay'
 import { KillFeed, useKillFeed } from '@/components/game/KillFeed'
 import { ChatPanel }             from '@/components/game/ChatPanel'
 import { KillcamOverlay }        from '@/components/game/KillcamOverlay'
+import { RadarOverlay }          from '@/components/game/RadarOverlay'
 import { Button }                from '@/components/ui/Button'
 import { ShareGameId }           from '@/components/lobby/ShareGameId'
 import { GameSettings }          from '@/components/lobby/GameSettings'
@@ -26,6 +27,7 @@ import { useGameTimer }          from '@/hooks/useGameTimer'
 import { useCountdown }          from '@/hooks/useCountdown'
 import { useGameChat }           from '@/hooks/useGameChat'
 import { useKillcam }            from '@/hooks/useKillcam'
+import { useRadar }              from '@/hooks/useRadar'
 import { registerHit, startGame, finishGameByTimeout, saveKillcamUrl } from '@/lib/game/actions'
 import { isHostPlayer } from '@/lib/game/utils'
 import { compositeKillcam }      from '@/lib/game/killcam-capture'
@@ -114,6 +116,9 @@ export default function GamePage() {
     deviceId:   session?.deviceId,
     gameStatus: game?.status,
   })
+
+  // ミニマップ用 GPS 追跡（ゲーム中のみ有効）
+  const { geoPos, gpsAvailable } = useRadar({ session, enabled: game?.status === 'active' })
 
   // カウントダウン
   const { phase: cdPhase, count: cdCount, isBlock: cdBlock } = useCountdown(game?.status)
@@ -423,6 +428,16 @@ export default function GamePage() {
       {/* カウントダウンオーバーレイ（死亡後スペクテイター上にも表示） */}
       <CountdownOverlay phase={cdPhase} count={cdCount} />
 
+      {/* ミニマップ（ゲーム中、死亡スペクテイター含む） */}
+      {isActive && session && (
+        <RadarOverlay
+          selfPlayerId={session.playerId}
+          players={players}
+          geoPos={geoPos}
+          gpsAvailable={gpsAvailable}
+        />
+      )}
+
       {/* キルフィード */}
       {isActive && <KillFeed events={killEvents} />}
 
@@ -512,9 +527,10 @@ export default function GamePage() {
             </div>
           )}
 
-          {/* 上部コントロール行（モードバッジ + AUTO/MANUAL） */}
-          <div className="absolute top-4 left-0 right-0 flex items-center justify-between px-4 pointer-events-none">
-            {/* モードバッジ（左） */}
+          {/* 上部コントロール（右側：モードバッジ + AUTO/MANUAL）
+              レーダーが左上を占有するため右側にまとめる */}
+          <div className="absolute top-4 right-4 flex flex-col items-end gap-2 pointer-events-none">
+            {/* モードバッジ */}
             <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
               scanMode === 'aruco'
                 ? 'bg-purple-900/70 border-purple-600 text-purple-300'
@@ -523,7 +539,7 @@ export default function GamePage() {
               {scanMode === 'aruco' ? '◈ ArUco' : '▦ QR'}
             </span>
 
-            {/* AUTO / MANUAL トグル（右） */}
+            {/* AUTO / MANUAL トグル */}
             <button
               onClick={() => setAutoFireEnabled((v) => !v)}
               className={`pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${

@@ -5,18 +5,17 @@ export type { MarkerMode }
 export const MARKER_MODE_KEY     = 'weasel_marker_mode'
 export const DEFAULT_MARKER_MODE: MarkerMode = 'qr'
 
-// ── ArUco 4x4_50 辞書: プレイヤー 1〜6 に対応するマーカー定義 ────────────────
-// bytes[0-1]: 16 ビット（MSB 先頭・行優先）で 4×4 内部セルを表す
-//   1=白セル、0=黒セル
-// js-aruco の codeList と同じエンコード
-export const ARUCO_MARKERS = [
-  { id: 0, bytes: [214, 119] as [number, number] },  // player_1
-  { id: 1, bytes: [22,  121] as [number, number] },  // player_2
-  { id: 2, bytes: [37,  108] as [number, number] },  // player_3
-  { id: 3, bytes: [198,  76] as [number, number] },  // player_4
-  { id: 4, bytes: [74,  195] as [number, number] },  // player_5
-  { id: 5, bytes: [26,   85] as [number, number] },  // player_6
-] as const
+// ── js-aruco マーカー定義（ID 0〜5 をプレイヤー 1〜6 に割り当て） ──────────────
+// ID の意味: js-aruco の 10 ビット Hamming 符号 ID（0〜1023）
+// 実際のビットパターンは lib/aruco/generator.ts の idToGrid() で生成する
+export const ARUCO_MARKERS: { id: number }[] = [
+  { id: 0 },  // player_1
+  { id: 1 },  // player_2
+  { id: 2 },  // player_3
+  { id: 3 },  // player_4
+  { id: 4 },  // player_5
+  { id: 5 },  // player_6
+]
 
 /** ArUco ID (0〜5) → QrCodeId */
 export const ARUCO_ID_TO_QR: Record<number, QrCodeId> = {

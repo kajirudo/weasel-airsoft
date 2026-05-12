@@ -23,7 +23,7 @@ function PlayerCard({
   const color   = QR_COLORS[qrId]
 
   // SVG を data URL に変換（cellPx=60 → 6×60=360px 正方形）
-  const imgSrc  = arucoSVGtoDataURL(marker.bytes[0], marker.bytes[1], 60)
+  const imgSrc  = arucoSVGtoDataURL(marker.id, 60)
 
   return (
     <div
