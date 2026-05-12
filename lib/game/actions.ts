@@ -114,24 +114,31 @@ export async function createRematch(params: {
   prevGameId: string
 }): Promise<{ gameId: string; shortCode: string }> {
   const supabase = createServerClient()
-  const { gameId, shortCode } = await createGame()
+
+  // 前ゲームの marker_mode を引き継ぐ
+  const { data: prevGame } = await supabase
+    .from('games').select('marker_mode').eq('id', params.prevGameId).single()
+  const markerMode = (prevGame?.marker_mode ?? 'qr') as MarkerMode
+
+  const { gameId, shortCode } = await createGame({ markerMode })
   await supabase.from('games').update({ next_game_id: gameId }).eq('id', params.prevGameId)
   return { gameId, shortCode }
 }
 
 export async function quickMatch(params: {
-  name: string
-  deviceId: string
+  name:        string
+  deviceId:    string
+  markerMode?: MarkerMode
 }): Promise<{ playerId: string; qrCodeId: QrCodeId; gameId: string }> {
   const supabase = createServerClient()
-  const { name, deviceId } = params
+  const { name, deviceId, markerMode = 'qr' } = params
   const { data: candidates } = await supabase
     .from('games').select('id').eq('status', 'lobby')
     .order('created_at', { ascending: false }).limit(5)
   for (const game of candidates ?? []) {
     try { return await joinGame({ gameId: game.id, name, deviceId }) } catch { continue }
   }
-  const { gameId: newGameId } = await createGame()
+  const { gameId: newGameId } = await createGame({ markerMode })
   return await joinGame({ gameId: newGameId, name, deviceId })
 }
 

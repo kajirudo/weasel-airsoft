@@ -41,13 +41,15 @@ function isBarcodeDetectorAvailable(): boolean {
 }
 
 interface UseScannerParams {
-  videoRef:  React.RefObject<HTMLVideoElement | null>
-  canvasRef: React.RefObject<HTMLCanvasElement | null>
-  enabled:   boolean
-  mode:      MarkerMode
+  videoRef:      React.RefObject<HTMLVideoElement | null>
+  canvasRef:     React.RefObject<HTMLCanvasElement | null>
+  enabled:       boolean
+  mode:          MarkerMode
+  /** レティクル判定半径（映像ピクセル空間）。省略時は constants.RETICLE_RADIUS を使用 */
+  reticleRadius?: number
 }
 
-export function useScanner({ videoRef, canvasRef, enabled, mode }: UseScannerParams) {
+export function useScanner({ videoRef, canvasRef, enabled, mode, reticleRadius }: UseScannerParams) {
   const [detectedQR, setDetectedQR] = useState<DetectedQR | null>(null)
 
   const rafRef       = useRef<number>(0)
@@ -128,7 +130,7 @@ export function useScanner({ videoRef, canvasRef, enabled, mode }: UseScannerPar
 
       ctx.drawImage(video, 0, 0, w, h)
 
-      const reticleZone: ReticleZone = { x: w / 2, y: h / 2, radius: RETICLE_RADIUS }
+      const reticleZone: ReticleZone = { x: w / 2, y: h / 2, radius: reticleRadius ?? RETICLE_RADIUS }
 
       if (mode === 'aruco') {
         // ArUco: 2 フレームに 1 回だけ実行（同期処理の負荷軽減）
@@ -181,7 +183,7 @@ export function useScanner({ videoRef, canvasRef, enabled, mode }: UseScannerPar
       prevRef.current      = { qrCodeId: null, isInReticle: false }
       setDetectedQR(null)
     }
-  }, [enabled, mode, videoRef, canvasRef])
+  }, [enabled, mode, reticleRadius, videoRef, canvasRef])
 
   return { detectedQR }
 }

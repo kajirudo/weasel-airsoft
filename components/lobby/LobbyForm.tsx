@@ -82,8 +82,9 @@ export function LobbyForm({ initialCode }: LobbyFormProps) {
     setLoading('quick'); setError(null)
     localStorage.setItem('weasel_player_name', name.trim())
     try {
-      const deviceId = getOrCreateDeviceId()
-      const { playerId, qrCodeId, gameId } = await quickMatch({ name: name.trim(), deviceId })
+      const deviceId   = getOrCreateDeviceId()
+      const markerMode = (localStorage.getItem(MARKER_MODE_KEY) ?? DEFAULT_MARKER_MODE) as MarkerMode
+      const { playerId, qrCodeId, gameId } = await quickMatch({ name: name.trim(), deviceId, markerMode })
       saveSession({ deviceId, playerId, gameId, qrCodeId, name: name.trim() })
       router.push(`/game/${gameId}`)
     } catch (e) {

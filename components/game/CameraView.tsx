@@ -35,7 +35,16 @@ export const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(
   function CameraView({ onQRDetected, onShoot, isInReticle, offline = false, markerMode = 'qr' }, ref) {
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const { videoRef, isReady, error, zoomInfo, setZoom } = useCamera()
-    const { detectedQR } = useScanner({ videoRef, canvasRef, enabled: isReady, mode: markerMode })
+
+    // ── ズーム連動 RETICLE_RADIUS ────────────────────────────────────────────
+    // ハードウェアズームは視野角を狭めるが映像解像度は変わらない。
+    // ズーム倍率が上がるほどマーカーが大きく映るため判定円を広げ、
+    // スコープ越しの狙撃でも確実にヒット判定が入るようにする。
+    // 例: 1× → radius=RETICLE_RADIUS, 2× → ×1.4, 4× → ×2.0
+    const currentZoom     = zoomInfo?.current ?? 1
+    const effectiveRadius = Math.round(RETICLE_RADIUS * Math.sqrt(currentZoom))
+
+    const { detectedQR } = useScanner({ videoRef, canvasRef, enabled: isReady, mode: markerMode, reticleRadius: effectiveRadius })
 
     // ArUco モードなら js-aruco を先行ロード（初回スキャンの遅延を防ぐ）
     useEffect(() => {
@@ -67,14 +76,6 @@ export const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(
       onShoot()
     }, [isInReticle, onShoot, offline])
 
-    // ── ズーム連動 RETICLE_RADIUS ────────────────────────────────────────────
-    // ハードウェアズームは視野角を狭めるが映像解像度は変わらない。
-    // ズーム倍率が上がるほどマーカーが大きく映るため判定円を広げ、
-    // スコープ越しの狙撃でも確実にヒット判定が入るようにする。
-    const currentZoom = zoomInfo?.current ?? 1
-    // 例: 1× → radius=RETICLE_RADIUS, 2× → ×1.4, 4× → ×2.0
-    const effectiveRadius = Math.round(RETICLE_RADIUS * Math.sqrt(currentZoom))
-
     // 端末が対応している倍率プリセットだけ表示
     const availablePresets = zoomInfo
       ? ZOOM_PRESETS.filter((z) => z <= zoomInfo.max)
@@ -97,14 +98,8 @@ export const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(
           muted
           className="absolute inset-0 w-full h-full object-cover"
         />
-        {/*
-          非表示 canvas: スキャン用（映像ピクセル空間）
-          effectiveRadius は useScanner 側の RETICLE_RADIUS と合わせる必要があるが
-          現状は constants の値をそのまま使用している。
-          ズーム連動は Reticle の視覚表示のみで対応し、
-          判定は映像ピクセル空間で行うため constants.RETICLE_RADIUS を使う。
-        */}
-        <canvas ref={canvasRef} className="hidden" data-effective-radius={effectiveRadius} />
+        {/* 非表示 canvas: スキャン用（映像ピクセル空間） */}
+        <canvas ref={canvasRef} className="hidden" />
 
         {/* レティクル（ズーム倍率を渡してスコープ表示を切り替える） */}
         <Reticle active={isInReticle} offline={offline} zoom={currentZoom} />
