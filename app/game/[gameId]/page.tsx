@@ -30,7 +30,8 @@ import { registerHit, startGame, finishGameByTimeout, saveKillcamUrl } from '@/l
 import { isHostPlayer } from '@/lib/game/utils'
 import { compositeKillcam }      from '@/lib/game/killcam-capture'
 import { createClient }          from '@/lib/supabase/client'
-import { MAX_HP, HIT_DAMAGE, STICKY_GRACE_MS, AUTO_FIRE_HOLD_MS } from '@/lib/game/constants'
+import { MAX_HP, HIT_DAMAGE, STICKY_GRACE_MS, AUTO_FIRE_HOLD_MS, MARKER_MODE_KEY, DEFAULT_MARKER_MODE } from '@/lib/game/constants'
+import type { MarkerMode } from '@/lib/game/constants'
 import type { DetectedQR, LocalPlayerSession } from '@/types/game'
 import type { Player, QrCodeId } from '@/types/database'
 
@@ -55,6 +56,11 @@ export default function GamePage() {
   const [autoFireEnabled, setAutoFireEnabled] = useState(() => {
     if (typeof window === 'undefined') return false
     return localStorage.getItem('weasel_autofire') !== 'false'
+  })
+  const [markerMode] = useState<MarkerMode>(() => {
+    if (typeof window === 'undefined') return DEFAULT_MARKER_MODE
+    const stored = localStorage.getItem(MARKER_MODE_KEY)
+    return stored === 'aruco' ? 'aruco' : DEFAULT_MARKER_MODE
   })
   const [stickyInReticle, setStickyInReticle] = useState(false)
   // チャージリングのアニメーションを再起動するキー（ターゲットが変わるたびに変わる）
@@ -360,6 +366,7 @@ export default function GamePage() {
             onShoot={handleShoot}
             isInReticle={stickyInReticle}
             offline={isOffline || cdBlock}
+            markerMode={markerMode}
           />
           <HitFlash isFlashing={isFlashing} />
           {isActive && <TimerDisplay remainingSeconds={remainingSeconds} />}
@@ -458,11 +465,11 @@ export default function GamePage() {
       {/* ─── ゲーム中ヒント ───────────────────────────────────────────────── */}
       {isActive && !isDead && (
         <>
-          {/* QR検出中だがレティクル外のヒント */}
+          {/* マーカー検出中だがレティクル外のヒント */}
           {detectedQR && !stickyInReticle && !isOffline && !cdBlock && (
             <div className="absolute bottom-24 left-0 right-0 flex justify-center pointer-events-none">
               <div className="bg-white/20 text-white text-xs px-3 py-1 rounded-full backdrop-blur-sm">
-                QR検出 — 中央に合わせてください
+                {markerMode === 'aruco' ? 'ArUco' : 'QR'}検出 — 中央に合わせてください
               </div>
             </div>
           )}

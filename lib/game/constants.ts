@@ -1,5 +1,30 @@
 import type { QrCodeId } from '@/types/database'
 
+// ── マーカーモード ────────────────────────────────────────────────────────────
+/** QR コードモード（〜5m）または ArUco モード（〜12m）*/
+export type MarkerMode = 'qr' | 'aruco'
+export const MARKER_MODE_KEY     = 'weasel_marker_mode'
+export const DEFAULT_MARKER_MODE: MarkerMode = 'qr'
+
+// ── ArUco 4x4_50 辞書: プレイヤー 1〜6 に対応するマーカー定義 ────────────────
+// bytes[0-1]: 16 ビット（MSB 先頭・行優先）で 4×4 内部セルを表す
+//   1=白セル、0=黒セル
+// js-aruco の codeList と同じエンコード
+export const ARUCO_MARKERS = [
+  { id: 0, bytes: [214, 119] as [number, number] },  // player_1
+  { id: 1, bytes: [22,  121] as [number, number] },  // player_2
+  { id: 2, bytes: [37,  108] as [number, number] },  // player_3
+  { id: 3, bytes: [198,  76] as [number, number] },  // player_4
+  { id: 4, bytes: [74,  195] as [number, number] },  // player_5
+  { id: 5, bytes: [26,   85] as [number, number] },  // player_6
+] as const
+
+/** ArUco ID (0〜5) → QrCodeId */
+export const ARUCO_ID_TO_QR: Record<number, QrCodeId> = {
+  0: 'player_1', 1: 'player_2', 2: 'player_3',
+  3: 'player_4', 4: 'player_5', 5: 'player_6',
+}
+
 export const MAX_HP = 100
 export const HIT_DAMAGE = 25
 export const MAX_PLAYERS = 6

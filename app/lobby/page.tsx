@@ -1,5 +1,6 @@
-import { LobbyForm }        from '@/components/lobby/LobbyForm'
-import { TutorialOverlay }  from '@/components/lobby/TutorialOverlay'
+import { LobbyForm }          from '@/components/lobby/LobbyForm'
+import { TutorialOverlay }    from '@/components/lobby/TutorialOverlay'
+import { MarkerModeSelector } from '@/components/lobby/MarkerModeSelector'
 
 export default function LobbyPage() {
   return (
@@ -14,12 +15,10 @@ export default function LobbyPage() {
 
         <LobbyForm />
 
-        <a
-          href="/qr"
-          className="text-gray-600 hover:text-gray-400 text-xs underline underline-offset-2 transition-colors"
-        >
-          QRコード印刷ページ →
-        </a>
+        {/* マーカーモード選択（QR / ArUco）*/}
+        <div className="w-full">
+          <MarkerModeSelector />
+        </div>
       </div>
 
       {/* 初回のみ表示されるチュートリアル */}

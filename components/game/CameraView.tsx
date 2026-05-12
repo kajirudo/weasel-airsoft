@@ -2,16 +2,19 @@
 
 import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { useCamera }    from '@/hooks/useCamera'
-import { useQRScanner } from '@/hooks/useQRScanner'
+import { useScanner }   from '@/hooks/useScanner'
 import { Reticle }      from './Reticle'
-import type { DetectedQR } from '@/types/game'
+import type { DetectedQR }  from '@/types/game'
+import type { MarkerMode }  from '@/lib/game/constants'
 
 interface CameraViewProps {
   onQRDetected: (qr: DetectedQR | null) => void
   onShoot:      () => void
   isInReticle:  boolean
   /** true のとき通信切断中を示す（バイブレーション無効 + レティクル変色） */
-  offline?: boolean
+  offline?:    boolean
+  /** 'qr'（デフォルト）または 'aruco' */
+  markerMode?: MarkerMode
 }
 
 /** CameraView から親に公開するメソッド群 */
@@ -32,10 +35,10 @@ function vibrate(pattern: VibratePattern) {
 const ZOOM_PRESETS = [1, 2, 4] as const
 
 export const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(
-  function CameraView({ onQRDetected, onShoot, isInReticle, offline = false }, ref) {
+  function CameraView({ onQRDetected, onShoot, isInReticle, offline = false, markerMode = 'qr' }, ref) {
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const { videoRef, isReady, error, zoomInfo, setZoom } = useCamera()
-    const { detectedQR } = useQRScanner({ videoRef, canvasRef, enabled: isReady })
+    const { detectedQR } = useScanner({ videoRef, canvasRef, enabled: isReady, mode: markerMode })
 
     // 親コンポーネントへ captureFrame を公開
     useImperativeHandle(ref, () => ({
