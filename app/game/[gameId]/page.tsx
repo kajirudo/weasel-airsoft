@@ -30,10 +30,9 @@ import { registerHit, startGame, finishGameByTimeout, saveKillcamUrl } from '@/l
 import { isHostPlayer } from '@/lib/game/utils'
 import { compositeKillcam }      from '@/lib/game/killcam-capture'
 import { createClient }          from '@/lib/supabase/client'
-import { MAX_HP, HIT_DAMAGE, STICKY_GRACE_MS, AUTO_FIRE_HOLD_MS, MARKER_MODE_KEY, DEFAULT_MARKER_MODE } from '@/lib/game/constants'
-import type { MarkerMode } from '@/lib/game/constants'
+import { MAX_HP, HIT_DAMAGE, STICKY_GRACE_MS, AUTO_FIRE_HOLD_MS } from '@/lib/game/constants'
 import type { DetectedQR, LocalPlayerSession } from '@/types/game'
-import type { Player, QrCodeId } from '@/types/database'
+import type { Player, QrCodeId, MarkerMode } from '@/types/database'
 
 const DEFAULT_SHOOT_COOLDOWN = 800
 
@@ -49,18 +48,17 @@ export default function GamePage() {
     shootCooldown:   DEFAULT_SHOOT_COOLDOWN,
     durationMinutes: 0,
     teamMode:        false,
+    markerMode:      'qr' as MarkerMode,
   })
+
+  // ゲームレコードから markerMode を初期化（game が読み込まれた時点で同期）
+  const markerModeSyncedRef = useRef(false)
   const lastShotRef = useRef(0)
 
   // ── オートファイア / スティッキー検知 ──────────────────────────────────────
   const [autoFireEnabled, setAutoFireEnabled] = useState(() => {
     if (typeof window === 'undefined') return false
     return localStorage.getItem('weasel_autofire') !== 'false'
-  })
-  const [markerMode] = useState<MarkerMode>(() => {
-    if (typeof window === 'undefined') return DEFAULT_MARKER_MODE
-    const stored = localStorage.getItem(MARKER_MODE_KEY)
-    return stored === 'aruco' ? 'aruco' : DEFAULT_MARKER_MODE
   })
   const [stickyInReticle, setStickyInReticle] = useState(false)
   // チャージリングのアニメーションを再起動するキー（ターゲットが変わるたびに変わる）
@@ -101,6 +99,14 @@ export default function GamePage() {
 
   // playersRef を最新状態に同期（captureKillcamRef 内で stale closure を避けるため）
   useEffect(() => { playersRef.current = players }, [players])
+
+  // ゲームレコードの marker_mode を balanceSettings に一度だけ同期
+  useEffect(() => {
+    if (game?.marker_mode && !markerModeSyncedRef.current) {
+      markerModeSyncedRef.current = true
+      setBalance((prev) => ({ ...prev, markerMode: game.marker_mode }))
+    }
+  }, [game?.marker_mode])
 
   useHeartbeat({
     gameId,
@@ -336,9 +342,13 @@ export default function GamePage() {
         shootCooldown:   balanceSettings.shootCooldown,
         durationMinutes: balanceSettings.durationMinutes,
         teamMode:        balanceSettings.teamMode,
+        markerMode:      balanceSettings.markerMode,
       })
     } catch { setIsStarting(false) }
   }
+
+  // DB から取得した確定済みモード（全プレイヤー共通）
+  const scanMode = (game?.marker_mode ?? 'qr') as MarkerMode
 
   const isLobby  = game?.status === 'lobby'
   const isActive = game?.status === 'active'
@@ -366,7 +376,7 @@ export default function GamePage() {
             onShoot={handleShoot}
             isInReticle={stickyInReticle}
             offline={isOffline || cdBlock}
-            markerMode={markerMode}
+            markerMode={scanMode}
           />
           <HitFlash isFlashing={isFlashing} />
           {isActive && <TimerDisplay remainingSeconds={remainingSeconds} />}
@@ -442,6 +452,25 @@ export default function GamePage() {
               <GameSettings {...balanceSettings} onChange={setBalance} />
             </div>
           )}
+          {/* 非ホスト向けモード表示 */}
+          {!isHost && game?.marker_mode && (
+            <div className="pointer-events-none bg-black/60 rounded-xl px-3 py-2 text-center">
+              <p className="text-gray-500 text-xs">マーカーモード</p>
+              <p className={`text-sm font-bold mt-0.5 ${
+                game.marker_mode === 'aruco' ? 'text-purple-400' : 'text-green-400'
+              }`}>
+                {game.marker_mode === 'aruco' ? '◈ ArUco（〜12m）' : '▦ QR（〜5m）'}
+              </p>
+              <a
+                href={game.marker_mode === 'aruco' ? '/aruco' : '/qr'}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-gray-600 underline pointer-events-auto"
+              >
+                マーカー印刷ページ →
+              </a>
+            </div>
+          )}
           {isHost && players.length >= 2 && (
             <div className="pointer-events-auto">
               <Button onClick={handleStartGame} loading={isStarting}>
@@ -469,7 +498,7 @@ export default function GamePage() {
           {detectedQR && !stickyInReticle && !isOffline && !cdBlock && (
             <div className="absolute bottom-24 left-0 right-0 flex justify-center pointer-events-none">
               <div className="bg-white/20 text-white text-xs px-3 py-1 rounded-full backdrop-blur-sm">
-                {markerMode === 'aruco' ? 'ArUco' : 'QR'}検出 — 中央に合わせてください
+                {scanMode === 'aruco' ? 'ArUco' : 'QR'}検出 — 中央に合わせてください
               </div>
             </div>
           )}
@@ -483,11 +512,21 @@ export default function GamePage() {
             </div>
           )}
 
-          {/* AUTO / MANUAL トグル */}
-          <div className="absolute top-4 right-4 pointer-events-auto">
+          {/* 上部コントロール行（モードバッジ + AUTO/MANUAL） */}
+          <div className="absolute top-4 left-0 right-0 flex items-center justify-between px-4 pointer-events-none">
+            {/* モードバッジ（左） */}
+            <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
+              scanMode === 'aruco'
+                ? 'bg-purple-900/70 border-purple-600 text-purple-300'
+                : 'bg-gray-900/70 border-gray-600 text-gray-400'
+            }`}>
+              {scanMode === 'aruco' ? '◈ ArUco' : '▦ QR'}
+            </span>
+
+            {/* AUTO / MANUAL トグル（右） */}
             <button
               onClick={() => setAutoFireEnabled((v) => !v)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
+              className={`pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
                 autoFireEnabled
                   ? 'bg-red-600/80 border-red-500 text-white'
                   : 'bg-black/60 border-gray-600 text-gray-400'

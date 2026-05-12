@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createGame, joinGame, quickMatch } from '@/lib/game/actions'
 import { Button } from '@/components/ui/Button'
+import { MARKER_MODE_KEY, DEFAULT_MARKER_MODE } from '@/lib/game/constants'
+import type { MarkerMode } from '@/lib/game/constants'
 import type { LocalPlayerSession } from '@/types/game'
 
 function getOrCreateDeviceId(): string {
@@ -45,8 +47,9 @@ export function LobbyForm({ initialCode }: LobbyFormProps) {
     setLoading('create'); setError(null)
     localStorage.setItem('weasel_player_name', name.trim())
     try {
-      const deviceId = getOrCreateDeviceId()
-      const { gameId } = await createGame()
+      const deviceId   = getOrCreateDeviceId()
+      const markerMode = (localStorage.getItem(MARKER_MODE_KEY) ?? DEFAULT_MARKER_MODE) as MarkerMode
+      const { gameId } = await createGame({ markerMode })
       const { playerId, qrCodeId } = await joinGame({ gameId, name: name.trim(), deviceId })
       saveSession({ deviceId, playerId, gameId, qrCodeId, name: name.trim() })
       router.push(`/game/${gameId}`)

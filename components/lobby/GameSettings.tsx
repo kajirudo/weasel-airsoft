@@ -1,10 +1,13 @@
 'use client'
 
+import type { MarkerMode } from '@/lib/game/constants'
+
 interface GameSettingsValues {
   hitDamage:       number
   shootCooldown:   number
   durationMinutes: number
   teamMode:        boolean
+  markerMode:      MarkerMode
 }
 
 interface GameSettingsProps extends GameSettingsValues {
@@ -42,10 +45,10 @@ function SliderField({
 }
 
 export function GameSettings({
-  hitDamage, shootCooldown, durationMinutes, teamMode, onChange,
+  hitDamage, shootCooldown, durationMinutes, teamMode, markerMode, onChange,
 }: GameSettingsProps) {
   const set = (partial: Partial<GameSettingsValues>) =>
-    onChange({ hitDamage, shootCooldown, durationMinutes, teamMode, ...partial })
+    onChange({ hitDamage, shootCooldown, durationMinutes, teamMode, markerMode, ...partial })
 
   return (
     <div className="w-full bg-black/70 rounded-xl px-4 py-3 backdrop-blur-sm space-y-4">
@@ -65,6 +68,32 @@ export function GameSettings({
         displayValue={durationMinutes === 0 ? '無制限' : `${durationMinutes}分`}
         onChange={(v) => set({ durationMinutes: v })}
       />
+
+      {/* マーカーモード */}
+      <div>
+        <p className="text-gray-400 text-xs mb-2">マーカーモード</p>
+        <div className="flex gap-2">
+          {(['qr', 'aruco'] as MarkerMode[]).map((m) => (
+            <button
+              key={m}
+              onClick={() => set({ markerMode: m })}
+              className={[
+                'flex-1 py-2 rounded-lg text-xs font-bold border transition-all',
+                markerMode === m
+                  ? 'bg-green-600/30 border-green-500 text-green-300'
+                  : 'bg-gray-800 border-gray-700 text-gray-500 hover:border-gray-500',
+              ].join(' ')}
+            >
+              {m === 'qr' ? '▦ QR（〜5m）' : '◈ ArUco（〜12m）'}
+            </button>
+          ))}
+        </div>
+        <p className="text-gray-600 text-xs mt-1.5">
+          {markerMode === 'qr'
+            ? '室内・近接戦向け。QRマーカーを印刷して装着。'
+            : '屋外サバゲー向け。ArUcoマーカーを印刷して装着。'}
+        </p>
+      </div>
 
       {/* チームモード */}
       <label className="flex items-center justify-between cursor-pointer select-none">

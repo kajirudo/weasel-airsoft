@@ -2,7 +2,7 @@
 
 import { createServerClient } from '@/lib/supabase/server'
 import { QR_CODE_IDS } from '@/lib/game/constants'
-import type { QrCodeId } from '@/types/database'
+import type { QrCodeId, MarkerMode } from '@/types/database'
 
 // ─── Short code generator ──────────────────────────────────────────────────────
 const SHORT_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -13,13 +13,17 @@ function generateShortCode(): string {
   return Array.from(buf, (b) => SHORT_CODE_CHARS[b % SHORT_CODE_CHARS.length]).join('')
 }
 
-export async function createGame(): Promise<{ gameId: string; shortCode: string }> {
-  const supabase = createServerClient()
+export async function createGame(params?: {
+  markerMode?: MarkerMode
+}): Promise<{ gameId: string; shortCode: string }> {
+  const supabase   = createServerClient()
+  const markerMode = params?.markerMode ?? 'qr'
+
   for (let attempt = 0; attempt < 5; attempt++) {
     const shortCode = generateShortCode()
     const { data, error } = await supabase
       .from('games')
-      .insert({ status: 'lobby', short_code: shortCode })
+      .insert({ status: 'lobby', short_code: shortCode, marker_mode: markerMode })
       .select('id, short_code')
       .single()
     if (!error && data) return { gameId: data.id, shortCode: data.short_code as string }
@@ -80,8 +84,9 @@ export async function startGame(params: {
   shootCooldown:   number
   durationMinutes: number
   teamMode:        boolean
+  markerMode:      MarkerMode
 }): Promise<void> {
-  const { gameId, hitDamage, shootCooldown, durationMinutes, teamMode } = params
+  const { gameId, hitDamage, shootCooldown, durationMinutes, teamMode, markerMode } = params
   const supabase = createServerClient()
 
   // チームモード時：スロット番号でチーム自動割り当て（奇数=赤、偶数=青）
@@ -99,6 +104,7 @@ export async function startGame(params: {
     shoot_cooldown:   shootCooldown,
     duration_minutes: durationMinutes,
     team_mode:        teamMode,
+    marker_mode:      markerMode,
   }).eq('id', gameId).eq('status', 'lobby')
 
   if (error) throw new Error('ゲーム開始に失敗しました')

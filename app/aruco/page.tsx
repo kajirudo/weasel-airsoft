@@ -174,7 +174,24 @@ export default function ArucoPage() {
             屋外サバゲー用。各プレイヤー A4 用紙 1 枚（全{ARUCO_MARKERS.length}枚）
           </p>
 
-          <div style={{ display: 'flex', justifyContent: 'center', gap: 12, marginTop: 16 }}>
+          {/* ── モード切り替えタブ ── */}
+          <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'center' }}>
+            <a href="/qr" style={{
+              background: '#1f2937', color: '#9ca3af', fontWeight: 500, fontSize: '0.8rem',
+              padding: '6px 16px', borderRadius: 20, border: '1px solid #374151',
+              textDecoration: 'none',
+            }}>
+              ← ▦ QRコード
+            </a>
+            <span style={{
+              background: '#581c87', color: '#d8b4fe', fontWeight: 700, fontSize: '0.8rem',
+              padding: '6px 16px', borderRadius: 20, border: '1px solid #7e22ce',
+            }}>
+              ◈ ArUco
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 12, marginTop: 12 }}>
             <button
               onClick={() => window.print()}
               style={{
@@ -193,6 +210,17 @@ export default function ArucoPage() {
             >
               ← ロビーへ
             </a>
+          </div>
+
+          {/* Quiet Zone 警告 */}
+          <div style={{
+            marginTop: 12, background: '#1c1917', border: '1px solid #78350f',
+            borderRadius: 10, padding: '10px 14px',
+            fontSize: '0.75rem', color: '#d97706', lineHeight: 1.6,
+          }}>
+            ⚠️ <strong>Quiet Zone（白余白）について</strong><br />
+            ArUco マーカーは周囲に <strong>マーカー幅の 10% 以上の白余白</strong> が必要です。<br />
+            印刷後、マーカーの周囲に最低 1.5cm 以上の白い領域を確保してください。
           </div>
 
           {/* 説明カード */}

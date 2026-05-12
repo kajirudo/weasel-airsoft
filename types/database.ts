@@ -1,6 +1,7 @@
-export type GameStatus = 'lobby' | 'active' | 'finished'
-export type QrCodeId  = 'player_1' | 'player_2' | 'player_3' | 'player_4' | 'player_5' | 'player_6'
-export type Team      = 'none' | 'red' | 'blue'
+export type GameStatus  = 'lobby' | 'active' | 'finished'
+export type QrCodeId   = 'player_1' | 'player_2' | 'player_3' | 'player_4' | 'player_5' | 'player_6'
+export type Team       = 'none' | 'red' | 'blue'
+export type MarkerMode = 'qr' | 'aruco'
 
 export interface Game {
   id:               string
@@ -16,6 +17,7 @@ export interface Game {
   duration_minutes: number
   next_game_id:     string | null
   team_mode:        boolean
+  marker_mode:      MarkerMode
 }
 
 export interface Player {

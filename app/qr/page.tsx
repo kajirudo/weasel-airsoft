@@ -226,7 +226,24 @@ export default function QRPage() {
             各プレイヤーごとに A4 用紙 1 枚で出力されます（全{QR_CODE_IDS.length}枚）
           </p>
 
-          <div style={{ display: 'flex', justifyContent: 'center', gap: 12, marginTop: 16 }}>
+          {/* ── モード切り替えタブ ── */}
+          <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'center' }}>
+            <span style={{
+              background: '#166534', color: '#86efac', fontWeight: 700, fontSize: '0.8rem',
+              padding: '6px 16px', borderRadius: 20, border: '1px solid #16a34a',
+            }}>
+              ▦ QRコード
+            </span>
+            <a href="/aruco" style={{
+              background: '#1f2937', color: '#9ca3af', fontWeight: 500, fontSize: '0.8rem',
+              padding: '6px 16px', borderRadius: 20, border: '1px solid #374151',
+              textDecoration: 'none',
+            }}>
+              ◈ ArUco →
+            </a>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 12, marginTop: 12 }}>
             <button
               onClick={() => window.print()}
               style={{

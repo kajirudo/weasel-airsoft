@@ -1,8 +1,7 @@
-import type { QrCodeId } from '@/types/database'
+import type { QrCodeId, MarkerMode } from '@/types/database'
+export type { MarkerMode }
 
 // ── マーカーモード ────────────────────────────────────────────────────────────
-/** QR コードモード（〜5m）または ArUco モード（〜12m）*/
-export type MarkerMode = 'qr' | 'aruco'
 export const MARKER_MODE_KEY     = 'weasel_marker_mode'
 export const DEFAULT_MARKER_MODE: MarkerMode = 'qr'
 

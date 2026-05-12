@@ -1,12 +1,19 @@
 'use client'
 
 /**
- * useScanner — QR コード / ArUco マーカーの両方に対応した統合スキャナーフック。
+ * useScanner — QR / ArUco 統合スキャナーフック
  *
- * mode = 'qr'   → BarcodeDetector (async) + jsQR フォールバック (sync)
- * mode = 'aruco' → js-aruco (sync、遅延ロード後)
+ * ─── ライブラリ競合防止 ───────────────────────────────────────────────────────
+ * mode = 'qr'   → BarcodeDetector / jsQR のみ使用。js-aruco は一切ロードしない。
+ * mode = 'aruco' → js-aruco のみ使用。BarcodeDetector / jsQR は一切起動しない。
  *
- * 返り値の DetectedQR 型は両モードで同一（qrCodeId は常に QrCodeId 型）。
+ * mode が変わると useEffect のクリーンアップ（rAF キャンセル）→ 再起動が走り、
+ * 前モードのリソースは完全に解放される。
+ *
+ * ─── パフォーマンス ────────────────────────────────────────────────────────────
+ * ArUco (js-aruco) は同期処理で重いため 2 フレームに 1 回だけ実行する。
+ * QR (BarcodeDetector) は非同期なので毎フレーム起動しても重複防止フラグで制御。
+ * QR (jsQR フォールバック) は同期・軽量なので毎フレーム実行。
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -43,36 +50,53 @@ interface UseScannerParams {
 export function useScanner({ videoRef, canvasRef, enabled, mode }: UseScannerParams) {
   const [detectedQR, setDetectedQR] = useState<DetectedQR | null>(null)
 
-  const rafRef        = useRef<number>(0)
-  const prevRef       = useRef<{ qrCodeId: string | null; isInReticle: boolean }>({
+  const rafRef       = useRef<number>(0)
+  const prevRef      = useRef<{ qrCodeId: string | null; isInReticle: boolean }>({
     qrCodeId: null, isInReticle: false,
   })
-  const detectingRef  = useRef(false)  // BarcodeDetector 非同期呼び出し中フラグ
-  const bdRef         = useRef<{ detect(s: HTMLCanvasElement): Promise<BarcodeResult[]> } | null>(null)
-  // ArUco Detector（遅延ロード後にセット）
-  const arucoRef      = useRef<import('js-aruco').AR.Detector | null>(null)
+
+  // ── QR モード専用リソース ─────────────────────────────────────────────────
+  const detectingRef = useRef(false)  // BarcodeDetector 非同期呼び出し中フラグ
+  const bdRef        = useRef<{ detect(s: HTMLCanvasElement): Promise<BarcodeResult[]> } | null>(null)
+
+  // ── ArUco モード専用リソース ──────────────────────────────────────────────
+  const arucoRef     = useRef<import('js-aruco').AR.Detector | null>(null)
+  const frameCount   = useRef(0)  // ArUco フレームスキップ用カウンタ
 
   useEffect(() => {
     if (!enabled) return
 
-    // ── QR モード: BarcodeDetector 初期化 ─────────────────────────────────
+    // ── QR モード初期化（ArUco リソースはセットしない） ─────────────────
     let useBD = false
-    if (mode === 'qr' && isBarcodeDetectorAvailable()) {
-      try {
-        bdRef.current = new BarcodeDetector({ formats: ['qr_code'] }) as {
-          detect(source: HTMLCanvasElement): Promise<BarcodeResult[]>
+    if (mode === 'qr') {
+      bdRef.current    = null
+      arucoRef.current = null
+      detectingRef.current = false
+
+      if (isBarcodeDetectorAvailable()) {
+        try {
+          bdRef.current = new BarcodeDetector({ formats: ['qr_code'] }) as {
+            detect(source: HTMLCanvasElement): Promise<BarcodeResult[]>
+          }
+          useBD = true
+        } catch {
+          useBD = false
         }
-        useBD = true
-      } catch {
-        useBD = false
       }
     }
 
-    // ── ArUco モード: Detector を非同期ロード ────────────────────────────
+    // ── ArUco モード初期化（QR リソースはセットしない） ─────────────────
     if (mode === 'aruco') {
-      getDetector().then((d) => { arucoRef.current = d }).catch(() => {})
+      bdRef.current        = null    // BarcodeDetector を明示的に無効化
+      detectingRef.current = false
+      frameCount.current   = 0
+
+      getDetector()
+        .then((d) => { arucoRef.current = d })
+        .catch(() => { /* 読み込み失敗は無視、次フレームで再試行 */ })
     }
 
+    // ── 検出結果を state に反映（変化があるときのみ） ─────────────────────
     function applyResult(result: DetectedQR | null) {
       const nextId = result?.qrCodeId ?? null
       const nextIn = result?.isInReticle ?? false
@@ -85,6 +109,7 @@ export function useScanner({ videoRef, canvasRef, enabled, mode }: UseScannerPar
       }
     }
 
+    // ── rAF スキャンループ ─────────────────────────────────────────────────
     function scan() {
       const video  = videoRef.current
       const canvas = canvasRef.current
@@ -106,46 +131,54 @@ export function useScanner({ videoRef, canvasRef, enabled, mode }: UseScannerPar
       const reticleZone: ReticleZone = { x: w / 2, y: h / 2, radius: RETICLE_RADIUS }
 
       if (mode === 'aruco') {
-        // ── ArUco パス（同期）───────────────────────────────────────────
-        if (arucoRef.current) {
+        // ArUco: 2 フレームに 1 回だけ実行（同期処理の負荷軽減）
+        frameCount.current++
+        if (frameCount.current % 2 === 0 && arucoRef.current) {
           const imageData = ctx.getImageData(0, 0, w, h)
           applyResult(detectAruco(arucoRef.current, imageData, reticleZone))
         }
-        // arucoRef.current が null の間（初回ロード中）は null を保持
-      } else if (useBD && bdRef.current && !detectingRef.current) {
-        // ── BarcodeDetector パス（非同期・高速） ─────────────────────────
-        detectingRef.current = true
-        bdRef.current.detect(canvas)
-          .then((results) => {
-            if (results.length === 0) { applyResult(null); return }
-            for (const r of results) {
-              if ((QR_CODE_IDS as string[]).includes(r.rawValue)) {
-                applyResult(computeFromCorners(
-                  Array.from(r.cornerPoints),
-                  reticleZone,
-                  r.rawValue as QrCodeId,
-                ))
-                return
+      } else {
+        // QR モード
+        if (useBD && bdRef.current && !detectingRef.current) {
+          // BarcodeDetector パス（非同期・高速）
+          detectingRef.current = true
+          bdRef.current.detect(canvas)
+            .then((results) => {
+              if (results.length === 0) { applyResult(null); return }
+              for (const r of results) {
+                if ((QR_CODE_IDS as string[]).includes(r.rawValue)) {
+                  applyResult(computeFromCorners(
+                    Array.from(r.cornerPoints),
+                    reticleZone,
+                    r.rawValue as QrCodeId,
+                  ))
+                  return
+                }
               }
-            }
-            applyResult(null)
-          })
-          .catch(() => applyResult(null))
-          .finally(() => { detectingRef.current = false })
-      } else if (mode === 'qr' && !useBD) {
-        // ── jsQR フォールバック（同期） ──────────────────────────────────
-        const imageData = ctx.getImageData(0, 0, w, h)
-        applyResult(scanFrame(imageData, reticleZone))
+              applyResult(null)
+            })
+            .catch(() => applyResult(null))
+            .finally(() => { detectingRef.current = false })
+        } else if (!useBD) {
+          // jsQR フォールバック（同期）
+          const imageData = ctx.getImageData(0, 0, w, h)
+          applyResult(scanFrame(imageData, reticleZone))
+        }
       }
 
       rafRef.current = requestAnimationFrame(scan)
     }
 
     rafRef.current = requestAnimationFrame(scan)
+
     return () => {
+      // モード切り替え・アンマウント時: 全リソースをクリーンアップ
       cancelAnimationFrame(rafRef.current)
-      // モード切り替え時にリセット
-      prevRef.current = { qrCodeId: null, isInReticle: false }
+      bdRef.current        = null
+      arucoRef.current     = null
+      detectingRef.current = false
+      frameCount.current   = 0
+      prevRef.current      = { qrCodeId: null, isInReticle: false }
       setDetectedQR(null)
     }
   }, [enabled, mode, videoRef, canvasRef])

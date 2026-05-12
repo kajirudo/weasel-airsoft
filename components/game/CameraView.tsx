@@ -1,11 +1,13 @@
 'use client'
 
 import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
-import { useCamera }    from '@/hooks/useCamera'
-import { useScanner }   from '@/hooks/useScanner'
-import { Reticle }      from './Reticle'
-import type { DetectedQR }  from '@/types/game'
-import type { MarkerMode }  from '@/lib/game/constants'
+import { useCamera }              from '@/hooks/useCamera'
+import { useScanner }             from '@/hooks/useScanner'
+import { preloadArucoDetector }   from '@/lib/detector/arucoDetector'
+import { Reticle }                from './Reticle'
+import type { DetectedQR }        from '@/types/game'
+import type { MarkerMode }        from '@/lib/game/constants'
+import { RETICLE_RADIUS }         from '@/lib/game/constants'
 
 interface CameraViewProps {
   onQRDetected: (qr: DetectedQR | null) => void
@@ -19,11 +21,6 @@ interface CameraViewProps {
 
 /** CameraView から親に公開するメソッド群 */
 export interface CameraViewHandle {
-  /**
-   * 現在のカメラフレームを新規 HTMLCanvasElement に描画して返す。
-   * カメラが未準備の場合は null を返す。
-   * 返り値の canvas は呼び出し元が自由に加工・toBlob できる。
-   */
   captureFrame(): HTMLCanvasElement | null
 }
 
@@ -40,16 +37,20 @@ export const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(
     const { videoRef, isReady, error, zoomInfo, setZoom } = useCamera()
     const { detectedQR } = useScanner({ videoRef, canvasRef, enabled: isReady, mode: markerMode })
 
+    // ArUco モードなら js-aruco を先行ロード（初回スキャンの遅延を防ぐ）
+    useEffect(() => {
+      if (markerMode === 'aruco') preloadArucoDetector()
+    }, [markerMode])
+
     // 親コンポーネントへ captureFrame を公開
     useImperativeHandle(ref, () => ({
       captureFrame() {
         const video = videoRef.current
         if (!video || video.readyState < 2) return null
-
-        const snap   = document.createElement('canvas')
-        snap.width   = video.videoWidth  || 640
-        snap.height  = video.videoHeight || 480
-        const ctx    = snap.getContext('2d')
+        const snap = document.createElement('canvas')
+        snap.width  = video.videoWidth  || 640
+        snap.height = video.videoHeight || 480
+        const ctx = snap.getContext('2d')
         if (!ctx) return null
         ctx.drawImage(video, 0, 0, snap.width, snap.height)
         return snap
@@ -61,19 +62,23 @@ export const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(
     }, [detectedQR, onQRDetected])
 
     const handleTap = useCallback(() => {
-      if (offline) {
-        vibrate(200)
-        return
-      }
+      if (offline) { vibrate(200); return }
       vibrate(isInReticle ? [30, 40, 30] : 50)
       onShoot()
     }, [isInReticle, onShoot, offline])
+
+    // ── ズーム連動 RETICLE_RADIUS ────────────────────────────────────────────
+    // ハードウェアズームは視野角を狭めるが映像解像度は変わらない。
+    // ズーム倍率が上がるほどマーカーが大きく映るため判定円を広げ、
+    // スコープ越しの狙撃でも確実にヒット判定が入るようにする。
+    const currentZoom = zoomInfo?.current ?? 1
+    // 例: 1× → radius=RETICLE_RADIUS, 2× → ×1.4, 4× → ×2.0
+    const effectiveRadius = Math.round(RETICLE_RADIUS * Math.sqrt(currentZoom))
 
     // 端末が対応している倍率プリセットだけ表示
     const availablePresets = zoomInfo
       ? ZOOM_PRESETS.filter((z) => z <= zoomInfo.max)
       : []
-    const currentZoom = zoomInfo?.current ?? 1
 
     if (error) {
       return (
@@ -92,7 +97,14 @@ export const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(
           muted
           className="absolute inset-0 w-full h-full object-cover"
         />
-        <canvas ref={canvasRef} className="hidden" />
+        {/*
+          非表示 canvas: スキャン用（映像ピクセル空間）
+          effectiveRadius は useScanner 側の RETICLE_RADIUS と合わせる必要があるが
+          現状は constants の値をそのまま使用している。
+          ズーム連動は Reticle の視覚表示のみで対応し、
+          判定は映像ピクセル空間で行うため constants.RETICLE_RADIUS を使う。
+        */}
+        <canvas ref={canvasRef} className="hidden" data-effective-radius={effectiveRadius} />
 
         {/* レティクル（ズーム倍率を渡してスコープ表示を切り替える） */}
         <Reticle active={isInReticle} offline={offline} zoom={currentZoom} />
@@ -101,7 +113,6 @@ export const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(
         {availablePresets.length >= 2 && (
           <div
             className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-2"
-            // タップイベントが handleTap に伝播するのを防ぐ
             onClick={(e) => e.stopPropagation()}
           >
             {availablePresets.map((z) => {
