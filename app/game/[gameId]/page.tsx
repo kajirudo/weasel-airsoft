@@ -779,18 +779,24 @@ export default function GamePage() {
 
       {/* ─── ロビー中 ────────────────────────────────────────────────────── */}
       {isLobby && (
-        <div className="absolute inset-0 flex flex-col items-center gap-3 px-4 pt-4 pb-8 z-10 overflow-y-auto pointer-events-none">
-          <div className="w-full max-w-xs pointer-events-auto">
+        /* iOS Safari でスクロールするには pointer-events-auto が必須。
+           touch-pan-y + [-webkit-overflow-scrolling:touch] でモメンタムスクロールも有効化。
+           ロビー中は射撃不要なので全体 pointer-events-auto で問題なし。 */
+        <div
+          className="absolute inset-0 flex flex-col items-center gap-3 px-4 pt-4 pb-safe-or-8 z-10 overflow-y-auto overscroll-contain"
+          style={{ WebkitOverflowScrolling: 'touch', paddingBottom: 'max(2rem, env(safe-area-inset-bottom, 2rem))' }}
+        >
+          <div className="w-full max-w-xs">
             <ShareGameId gameId={gameId} shortCode={game?.short_code} />
           </div>
           {isHost && (
-            <div className="w-full max-w-xs pointer-events-auto">
+            <div className="w-full max-w-xs">
               <GameSettings {...balanceSettings} onChange={setBalance} />
             </div>
           )}
           {/* 非ホスト向けモード表示 */}
           {!isHost && game?.marker_mode && (
-            <div className="pointer-events-none bg-black/60 rounded-xl px-3 py-2 text-center">
+            <div className="bg-black/60 rounded-xl px-3 py-2 text-center">
               <p className="text-gray-500 text-xs">マーカーモード</p>
               <p className={`text-sm font-bold mt-0.5 ${
                 game.marker_mode === 'aruco' ? 'text-purple-400' : 'text-green-400'
@@ -801,26 +807,24 @@ export default function GamePage() {
                 href={game.marker_mode === 'aruco' ? '/aruco' : '/qr'}
                 target="_blank"
                 rel="noreferrer"
-                className="text-xs text-gray-600 underline pointer-events-auto"
+                className="text-xs text-gray-600 underline"
               >
                 マーカー印刷ページ →
               </a>
             </div>
           )}
           {isHost && players.length >= 2 && (
-            <div className="pointer-events-auto">
-              <Button onClick={handleStartGame} loading={isStarting}>
-                ゲーム開始 ({players.length}人)
-              </Button>
-            </div>
+            <Button onClick={handleStartGame} loading={isStarting}>
+              ゲーム開始 ({players.length}人)
+            </Button>
           )}
           {isHost && players.length < 2 && (
-            <p className="text-gray-300 text-sm bg-black/60 px-3 py-1 rounded-lg pointer-events-none">
+            <p className="text-gray-300 text-sm bg-black/60 px-3 py-1 rounded-lg">
               あと{2 - players.length}人参加で開始できます
             </p>
           )}
           {!isHost && (
-            <p className="text-gray-300 text-sm bg-black/60 px-3 py-1 rounded-lg pointer-events-none">
+            <p className="text-gray-300 text-sm bg-black/60 px-3 py-1 rounded-lg">
               ホストがゲームを開始するまで待機中...
             </p>
           )}
