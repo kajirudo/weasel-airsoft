@@ -87,8 +87,9 @@ export default function GamePage() {
 
   useWakeLock()
 
-  const { isFlashing, triggerFlash }              = useHitEffect()
-  const { playShot, playHit, playKill, playTimeout } = useSound()
+  const { isFlashing, flashColor, triggerFlash, triggerStormFlash } = useHitEffect()
+  const { playShot, playHit, playKill, playTimeout,
+          playGeneratorAlert, playCaptureDone, playStormDamage } = useSound()
   const { events: killEvents, addKill }           = useKillFeed()
 
   // キル通知コールバック（usePlayerRealtime へ渡す）
@@ -134,15 +135,17 @@ export default function GamePage() {
     gameId:  gameId ?? null,
     geoPos,
     enabled: game?.status === 'active',
+    onGeneratorActivated: useCallback((allActivated: boolean) => {
+      playGeneratorAlert()
+      if (allActivated) {
+        // 全発電機起動！ — 追加でキル音も重ねる
+        setTimeout(() => playKill(), 350)
+      }
+    }, [playGeneratorAlert, playKill]),
   })
 
-  // ストーム（バトルモードのみ）
-  const storm = useStorm({
-    game,
-    geoPos,
-    session,
-    enabled: game?.status === 'active' && game?.game_mode === 'battle',
-  })
+  // ストーム（selfPlayer 宣言前なので selfPlayer は後から渡す — useStorm 内で ref 参照）
+  // ※ selfPlayer / nearbyObjectivesWithBonus は line 225 以降に宣言
 
   // タクティクス: ホストがスコアをコミット（30秒ごと）
   const tacticsCommitRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -191,6 +194,40 @@ export default function GamePage() {
   const selfPlayer: Player | undefined = players.find((p) => p.id === session?.playerId)
   const isHost     = isHostPlayer(players, session?.playerId)
   isHostRef.current = isHost
+
+  // ストーム（selfPlayer 確定後に宣言）
+  const storm = useStorm({
+    game,
+    geoPos,
+    session,
+    selfPlayer,
+    enabled:  game?.status === 'active' && game?.game_mode === 'battle',
+    onDamage: useCallback(() => {
+      triggerStormFlash()
+      playStormDamage()
+    }, [triggerStormFlash, playStormDamage]),
+  })
+
+  // 拠点の nearbyTeamCount を GPS で計算して注入（selfPlayer 確定後）
+  const selfTeam = selfPlayer?.team ?? 'none'
+  const nearbyObjectivesWithBonus = {
+    ...nearbyObjectives,
+    controlPoints: nearbyObjectives.controlPoints.map(cp => {
+      if (!geoPos || selfTeam === 'none') return cp
+      const mPerDegLat = 111_320
+      const mPerDegLng = 111_320 * Math.cos(geoPos.lat * Math.PI / 180)
+      const count = players.filter(p => {
+        if (!p.is_alive || p.team !== selfTeam) return false
+        if (p.lat == null || p.lng == null) return false
+        const d = Math.sqrt(
+          ((p.lat - cp.lat) * mPerDegLat) ** 2 +
+          ((p.lng - cp.lng) * mPerDegLng) ** 2,
+        )
+        return d <= 10  // CAPTURE_RADIUS_M
+      }).length
+      return { ...cp, nearbyTeamCount: Math.max(1, count) }
+    }),
+  }
 
   const { remainingSeconds } = useGameTimer({
     startedAt:       game?.started_at ?? null,
@@ -389,6 +426,7 @@ export default function GamePage() {
         teamMode:         balanceSettings.teamMode,
         markerMode:       balanceSettings.markerMode,
         gameMode:         balanceSettings.gameMode,
+        stormRadiusM:     balanceSettings.stormRadiusM,
         stormFinalM:      balanceSettings.stormFinalM,
         fieldCenterLat:   geoPos?.lat ?? undefined,
         fieldCenterLng:   geoPos?.lng ?? undefined,
@@ -428,7 +466,7 @@ export default function GamePage() {
             offline={isOffline || cdBlock}
             markerMode={scanMode}
           />
-          <HitFlash isFlashing={isFlashing} />
+          <HitFlash isFlashing={isFlashing} color={flashColor} />
           {isActive && <TimerDisplay remainingSeconds={remainingSeconds} />}
           {selfPlayer && <HpOverlay selfPlayer={selfPlayer} allPlayers={players} />}
 
@@ -504,10 +542,12 @@ export default function GamePage() {
       {/* 近接オブジェクト操作ボタン（サバイバル・タクティクス・バトル） */}
       {isActive && session && selfPlayer?.is_alive && (
         <ObjectiveAlert
-          nearby={nearbyObjectives}
+          nearby={nearbyObjectivesWithBonus}
           session={session}
           gameId={gameId}
           team={selfPlayer?.team ?? 'none'}
+          onCaptureDone={playCaptureDone}
+          onGeneratorDone={playGeneratorAlert}
         />
       )}
 

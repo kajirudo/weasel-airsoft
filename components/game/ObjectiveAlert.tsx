@@ -6,6 +6,7 @@
  * - 近くにアイテム/発電機/拠点があるとき画面下部に操作ボタンを表示
  * - 発電機・拠点は「ホールドボタン」で Hold タイマー付き操作
  * - アイテムはタップで即時獲得
+ * - 拠点: 相手チームが占領中は警告表示 / 同チーム複数人で速度2倍バッジ
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
@@ -23,32 +24,38 @@ import type { NearbyObjectives, ObjectiveWithDist } from '@/hooks/useObjectives'
 import type { LocalPlayerSession } from '@/types/game'
 
 interface Props {
-  nearby:  NearbyObjectives
-  session: LocalPlayerSession | null
-  gameId:  string
-  team:    'red' | 'blue' | 'none'
+  nearby:    NearbyObjectives
+  session:   LocalPlayerSession | null
+  gameId:    string
+  team:      'red' | 'blue' | 'none'
+  /** 占領完了時に呼ばれるコールバック（サウンド再生用） */
+  onCaptureDone?: () => void
+  /** 発電機起動完了時に呼ばれるコールバック */
+  onGeneratorDone?: () => void
 }
 
 // ── ホールドボタン ──────────────────────────────────────────────────────────────
 interface HoldButtonProps {
-  label:      string
-  holdMs:     number
-  disabled?:  boolean
-  onHoldStart:  () => void
+  label:          string
+  holdMs:         number
+  disabled?:      boolean
+  pulsing?:       boolean   // 占領中アニメーション
+  bonusBadge?:    string    // 人数ボーナスバッジ（例: "2× SPEED"）
+  onHoldStart:    () => void
   onHoldComplete: () => void
   onHoldCancel:   () => void
-  color:      string
+  color:          string
 }
 
 function HoldButton({
-  label, holdMs, disabled,
+  label, holdMs, disabled, pulsing, bonusBadge,
   onHoldStart, onHoldComplete, onHoldCancel,
   color,
 }: HoldButtonProps) {
-  const [progress,  setProgress]  = useState(0)   // 0〜1
-  const [holding,   setHolding]   = useState(false)
-  const startRef  = useRef<number | null>(null)
-  const rafRef    = useRef<number | null>(null)
+  const [progress,   setProgress]   = useState(0)
+  const [holding,    setHolding]    = useState(false)
+  const startRef     = useRef<number | null>(null)
+  const rafRef       = useRef<number | null>(null)
   const completedRef = useRef(false)
 
   function startHold() {
@@ -87,8 +94,6 @@ function HoldButton({
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
   }, [])
 
-  const progressPct = Math.round(progress * 100)
-
   return (
     <button
       disabled={disabled}
@@ -99,30 +104,41 @@ function HoldButton({
       style={{
         background: color,
         opacity: disabled ? 0.4 : 1,
-        minWidth: '8rem',
+        minWidth: '9rem',
+        // 占領中アニメーション（pulsing）
+        animation: pulsing && !holding ? 'cp-pulse 0.9s ease-in-out infinite alternate' : undefined,
       }}
     >
-      {/* プログレスバー */}
+      {/* ホールド進捗バー */}
       <span
-        className="pointer-events-none absolute inset-0 origin-left transition-none"
+        className="pointer-events-none absolute inset-0 origin-left"
         style={{
-          transform: `scaleX(${progress})`,
+          transform:  `scaleX(${progress})`,
           background: 'rgba(255,255,255,0.35)',
+          transition: 'none',
         }}
       />
+      {/* 人数ボーナスバッジ */}
+      {bonusBadge && !holding && (
+        <span className="absolute -top-2 -right-1 rounded-full bg-yellow-400 text-black text-[10px] font-black px-1.5 py-0.5 leading-none z-10">
+          {bonusBadge}
+        </span>
+      )}
       <span className="relative z-10">
-        {holding ? `${progressPct}%` : label}
+        {holding ? `${Math.round(progress * 100)}%` : label}
       </span>
     </button>
   )
 }
 
 // ── メインコンポーネント ────────────────────────────────────────────────────────
-export function ObjectiveAlert({ nearby, session, gameId, team }: Props) {
+export function ObjectiveAlert({
+  nearby, session, gameId, team,
+  onCaptureDone, onGeneratorDone,
+}: Props) {
   const [busy,    setBusy]    = useState(false)
   const [message, setMessage] = useState<string | null>(null)
 
-  // メッセージ自動クリア
   useEffect(() => {
     if (!message) return
     const t = setTimeout(() => setMessage(null), 3000)
@@ -135,18 +151,14 @@ export function ObjectiveAlert({ nearby, session, gameId, team }: Props) {
     setBusy(true)
     try {
       const result = await claimObjective({
-        objectiveId: obj.id,
-        playerId:    session.playerId,
-        deviceId:    session.deviceId,
-        gameId,
+        objectiveId: obj.id, playerId: session.playerId,
+        deviceId: session.deviceId, gameId,
       })
-      if (result.effect === 'medkit')       setMessage(`💊 回復！ HP → ${result.newHp}`)
+      if (result.effect === 'medkit')        setMessage(`💊 回復！ HP → ${result.newHp}`)
       else if (result.effect === 'damage_boost') setMessage('⚡ ダメージブースト獲得！次の射撃が2倍')
     } catch (e: unknown) {
       setMessage(`❌ ${e instanceof Error ? e.message : 'エラー'}`)
-    } finally {
-      setBusy(false)
-    }
+    } finally { setBusy(false) }
   }, [session, busy, gameId])
 
   // ── 発電機ホールド ────────────────────────────────────────────────────────
@@ -173,11 +185,12 @@ export function ObjectiveAlert({ nearby, session, gameId, team }: Props) {
         objectiveId: obj.id, playerId: session.playerId,
         deviceId: session.deviceId, gameId,
       })
+      onGeneratorDone?.()
       setMessage(allActivated ? '🔋 全発電機起動！Survivor 勝利！' : '🔋 発電機起動！')
     } catch (e: unknown) {
       setMessage(`❌ ${e instanceof Error ? e.message : 'エラー'}`)
     }
-  }, [session, gameId])
+  }, [session, gameId, onGeneratorDone])
 
   const handleGenCancel = useCallback(async () => {
     const obj = genRef.current
@@ -213,28 +226,40 @@ export function ObjectiveAlert({ nearby, session, gameId, team }: Props) {
         deviceId: session.deviceId, gameId,
         capturingTeam: team as 'red' | 'blue',
       })
+      onCaptureDone?.()
       setMessage('🏴 拠点を占領！')
     } catch (e: unknown) {
       setMessage(`❌ ${e instanceof Error ? e.message : 'エラー'}`)
     }
-  }, [session, gameId, team])
+  }, [session, gameId, team, onCaptureDone])
 
   const handleCpCancel = useCallback(async () => {
     const obj = cpRef.current
-    if (!session || !obj || team === 'none') return
+    if (!session || !obj) return
     try {
       await cancelCapture({ objectiveId: obj.id, playerId: session.playerId, gameId })
     } catch { /* 無視 */ }
-  }, [session, gameId, team])
+  }, [session, gameId])
 
   const hasAny = nearby.items.length > 0 || nearby.generators.length > 0 || nearby.controlPoints.length > 0
   if (!hasAny && !message) return null
 
-  const firstItem   = nearby.items[0]
-  const firstGen    = nearby.generators[0]
-  const firstCp     = nearby.controlPoints[0]
+  const firstItem = nearby.items[0]
+  const firstGen  = nearby.generators[0]
+  const firstCp   = nearby.controlPoints[0]
 
   const teamColor = team === 'red' ? '#ef4444' : team === 'blue' ? '#3b82f6' : '#6b7280'
+
+  // 拠点の状態
+  const enemyCapturing = firstCp?.capturing_team != null &&
+                         firstCp.capturing_team !== team
+  const alreadyOurs    = firstCp?.controlled_by === team
+  const needsCapture   = firstCp && team !== 'none' && !alreadyOurs
+
+  // 人数ボーナス (nearbyTeamCount は page.tsx から注入)
+  const cpTeamCount   = firstCp?.nearbyTeamCount ?? 1
+  const captureHoldMs = Math.ceil(CAPTURE_HOLD_MS / Math.min(cpTeamCount, 2))
+  const bonusBadge    = cpTeamCount >= 2 ? '2× SPEED' : undefined
 
   return (
     <div className="pointer-events-none fixed bottom-24 left-0 right-0 z-30 flex flex-col items-center gap-2 px-4">
@@ -245,6 +270,29 @@ export function ObjectiveAlert({ nearby, session, gameId, team }: Props) {
         </div>
       )}
 
+      {/* 相手チームが占領中の警告 */}
+      {enemyCapturing && (
+        <div
+          className="rounded-xl px-3 py-1.5 text-xs font-bold text-white"
+          style={{
+            background: firstCp?.capturing_team === 'red' ? 'rgba(239,68,68,0.85)' : 'rgba(59,130,246,0.85)',
+            animation: 'cp-pulse 0.8s ease-in-out infinite alternate',
+          }}
+        >
+          ⚠️ {firstCp?.capturing_team === 'red' ? '🔴 RED' : '🔵 BLUE'} が占領中！
+        </div>
+      )}
+
+      {/* すでに自チームが制圧済みバッジ */}
+      {alreadyOurs && firstCp && (
+        <div
+          className="rounded-xl px-3 py-1.5 text-xs font-bold text-white"
+          style={{ background: teamColor, opacity: 0.8 }}
+        >
+          ✅ 制圧済み
+        </div>
+      )}
+
       <div className="pointer-events-auto flex flex-wrap justify-center gap-2">
         {/* アイテム獲得ボタン */}
         {firstItem && (
@@ -252,11 +300,14 @@ export function ObjectiveAlert({ nearby, session, gameId, team }: Props) {
             disabled={busy}
             onClick={() => handleClaim(firstItem)}
             className="rounded-xl px-4 py-3 text-sm font-bold text-white"
-            style={{ background: firstItem.type === 'medkit' ? '#22c55e' : '#f59e0b', opacity: busy ? 0.4 : 1 }}
+            style={{
+              background: firstItem.type === 'medkit' ? '#22c55e' : '#f59e0b',
+              opacity: busy ? 0.4 : 1,
+            }}
           >
             {firstItem.type === 'medkit'
-              ? `💊 回復アイテム取得 (${firstItem.distM != null ? Math.round(firstItem.distM) + 'm' : '--'})`
-              : `⚡ ダメージブースト取得 (${firstItem.distM != null ? Math.round(firstItem.distM) + 'm' : '--'})`}
+              ? `💊 回復 (${firstItem.distM != null ? Math.round(firstItem.distM) + 'm' : '--'})`
+              : `⚡ ブースト (${firstItem.distM != null ? Math.round(firstItem.distM) + 'm' : '--'})`}
           </button>
         )}
 
@@ -273,17 +324,26 @@ export function ObjectiveAlert({ nearby, session, gameId, team }: Props) {
         )}
 
         {/* 拠点占領ホールドボタン */}
-        {firstCp && team !== 'none' && (
+        {needsCapture && (
           <HoldButton
-            label={`🏴 拠点占領 (${firstCp.distM != null ? Math.round(firstCp.distM) + 'm' : '--'})`}
-            holdMs={CAPTURE_HOLD_MS}
+            label={`🏴 占領 (${firstCp.distM != null ? Math.round(firstCp.distM) + 'm' : '--'})`}
+            holdMs={captureHoldMs}
             color={teamColor}
+            pulsing={!!enemyCapturing}
+            bonusBadge={bonusBadge}
             onHoldStart={() => handleCpStart(firstCp)}
             onHoldComplete={handleCpComplete}
             onHoldCancel={handleCpCancel}
           />
         )}
       </div>
+
+      <style>{`
+        @keyframes cp-pulse {
+          from { opacity: 0.75; transform: scale(1);    }
+          to   { opacity: 1;    transform: scale(1.03); }
+        }
+      `}</style>
     </div>
   )
 }

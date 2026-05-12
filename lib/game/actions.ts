@@ -117,19 +117,21 @@ export async function startGame(params: {
   teamMode:         boolean
   markerMode:       MarkerMode
   gameMode:         GameMode
-  /** ホストの GPS 座標（フィールド中心として使用）*/
+  /** ホストの GPS 座標（フィールド中心 + ストーム中心）*/
   fieldCenterLat?:  number
   fieldCenterLng?:  number
-  /** オブジェクト散布半径（m）*/
+  /** オブジェクト散布半径（m） */
   fieldRadiusM?:    number
-  /** ストーム最終半径（m）*/
+  /** ストーム初期安全圏半径（m） */
+  stormRadiusM?:    number
+  /** ストーム最終安全圏半径（m） */
   stormFinalM?:     number
 }): Promise<void> {
   const {
     gameId, hitDamage, shootCooldown, durationMinutes,
     teamMode, markerMode, gameMode,
     fieldCenterLat, fieldCenterLng,
-    fieldRadiusM = 70, stormFinalM = 15,
+    fieldRadiusM = 70, stormRadiusM = 80, stormFinalM = 15,
   } = params
   const supabase  = createServerClient()
   const startedAt = new Date().toISOString()
@@ -166,7 +168,7 @@ export async function startGame(params: {
     game_mode:        gameMode,
     storm_center_lat: fieldCenterLat ?? null,
     storm_center_lng: fieldCenterLng ?? null,
-    storm_radius_m:   fieldRadiusM,
+    storm_radius_m:   stormRadiusM,   // 初期安全圏（fieldRadiusM とは別）
     storm_final_m:    stormFinalM,
   }).eq('id', gameId).eq('status', 'lobby')
   if (error) throw new Error('ゲーム開始に失敗しました')
@@ -360,9 +362,12 @@ export async function completeGenerator(params: {
   const elapsedMs = Date.now() - new Date(obj.activate_start).getTime()
   if (elapsedMs < 9_500) throw new Error('まだ 10 秒経っていません')   // 500ms の誤差を許容
 
-  await supabase.from('game_objectives')
+  // is_activated=false を条件に加えて競合防止（2人同時完了で2重実行しない）
+  const { data: updated } = await supabase.from('game_objectives')
     .update({ is_activated: true, activate_start: null, activating_by: null })
-    .eq('id', objectiveId)
+    .eq('id', objectiveId).eq('is_activated', false)
+    .select('id')
+  if (!updated || updated.length === 0) return { allActivated: false }  // すでに別クライアントが完了済み
 
   // 全発電機起動チェック → Survivor 勝利判定
   const { data: remaining } = await supabase.from('game_objectives')
@@ -410,7 +415,7 @@ export async function beginCapture(params: {
     .eq('id', objectiveId).eq('game_id', gameId)
 }
 
-/** 拠点占領を完了する（サーバー側で 5 秒経過を検証） */
+/** 拠点占領を完了する（サーバー側で 5 秒経過 + 人数ボーナスを検証） */
 export async function completeCapture(params: {
   objectiveId:   string
   playerId:      string
@@ -422,7 +427,7 @@ export async function completeCapture(params: {
   const supabase = createServerClient()
 
   const { data: player } = await supabase.from('players')
-    .select('is_alive, team').eq('id', playerId).eq('device_id', deviceId).single()
+    .select('is_alive, team, lat, lng').eq('id', playerId).eq('device_id', deviceId).single()
   if (!player?.is_alive) throw new Error('戦闘不能です')
 
   const { data: obj } = await supabase.from('game_objectives')
@@ -431,8 +436,33 @@ export async function completeCapture(params: {
   if (obj.capturing_team !== capturingTeam) throw new Error('占領チームが一致しません')
   if (!obj.capture_start) throw new Error('占領が開始されていません')
 
+  // ── 人数ボーナス: 同チームの生存プレイヤーが CAPTURE_RADIUS_M 内に何人いるか確認 ──
+  // GPS 位置がある場合のみ適用（ない場合は 1 人扱い）
+  let teamCount = 1
+  if (player.lat != null && player.lng != null) {
+    const { data: allies } = await supabase.from('players')
+      .select('lat, lng')
+      .eq('game_id', gameId).eq('team', capturingTeam).eq('is_alive', true)
+    if (allies) {
+      const mPerDegLat = 111_320
+      const mPerDegLng = 111_320 * Math.cos(player.lat * Math.PI / 180)
+      teamCount = allies.filter(a => {
+        if (a.lat == null || a.lng == null) return false
+        const d = Math.sqrt(
+          ((a.lat - obj.lat) * mPerDegLat) ** 2 +
+          ((a.lng - obj.lng) * mPerDegLng) ** 2,
+        )
+        return d <= 10   // CAPTURE_RADIUS_M
+      }).length
+      teamCount = Math.max(1, teamCount)
+    }
+  }
+  // 2人以上で 2×、3人以上でも最大 2×（テンポを壊さない程度に）
+  const speedMultiplier = Math.min(teamCount, 2)
+  const requiredMs      = Math.ceil(4_500 / speedMultiplier)
+
   const elapsedMs = Date.now() - new Date(obj.capture_start).getTime()
-  if (elapsedMs < 4_500) throw new Error('まだ 5 秒経っていません')
+  if (elapsedMs < requiredMs) throw new Error('まだ占領時間が足りません')
 
   // 前チームのスコアを確定（コントロール時間を積算）
   if (obj.controlled_by !== 'none' && obj.control_since) {

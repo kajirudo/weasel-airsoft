@@ -107,5 +107,68 @@ export function useSound() {
     } catch { /* 無視 */ }
   }, [])
 
-  return { playShot, playHit, playKill, playTimeout }
+  /** 発電機起動完了アラート：上昇→急降下の緊張感ある2音 */
+  const playGeneratorAlert = useCallback(() => {
+    try {
+      const c = ctx()
+      // ピーン↑ ドン↓ の2連音
+      const times = [
+        { freq: 1200, endFreq: 800,  gain: 0.3, dur: 0.12, t: 0 },
+        { freq: 800,  endFreq: 200,  gain: 0.5, dur: 0.3,  t: 0.15 },
+      ]
+      for (const s of times) {
+        const osc  = c.createOscillator()
+        const gain = c.createGain()
+        osc.connect(gain)
+        gain.connect(c.destination)
+        osc.frequency.setValueAtTime(s.freq, c.currentTime + s.t)
+        osc.frequency.exponentialRampToValueAtTime(s.endFreq, c.currentTime + s.t + s.dur)
+        gain.gain.setValueAtTime(s.gain, c.currentTime + s.t)
+        gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + s.t + s.dur)
+        osc.start(c.currentTime + s.t)
+        osc.stop(c.currentTime + s.t + s.dur + 0.01)
+      }
+    } catch { /* 無視 */ }
+  }, [])
+
+  /** 拠点占領完了：ファンファーレ風の3連昇音 */
+  const playCaptureDone = useCallback(() => {
+    try {
+      const c = ctx()
+      const notes = [523, 659, 784, 1047] // C5, E5, G5, C6
+      notes.forEach((freq, i) => {
+        const osc  = c.createOscillator()
+        const gain = c.createGain()
+        osc.type = 'triangle'
+        osc.connect(gain)
+        gain.connect(c.destination)
+        osc.frequency.value = freq
+        const t = c.currentTime + i * 0.08
+        gain.gain.setValueAtTime(0.25, t)
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.2)
+        osc.start(t)
+        osc.stop(t + 0.2)
+      })
+    } catch { /* 無視 */ }
+  }, [])
+
+  /** ストームダメージ：低く重い連続ビープ */
+  const playStormDamage = useCallback(() => {
+    try {
+      const c = ctx()
+      const osc  = c.createOscillator()
+      const gain = c.createGain()
+      osc.type = 'square'
+      osc.connect(gain)
+      gain.connect(c.destination)
+      osc.frequency.setValueAtTime(120, c.currentTime)
+      osc.frequency.exponentialRampToValueAtTime(60, c.currentTime + 0.4)
+      gain.gain.setValueAtTime(0.15, c.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.4)
+      osc.start(c.currentTime)
+      osc.stop(c.currentTime + 0.4)
+    } catch { /* 無視 */ }
+  }, [])
+
+  return { playShot, playHit, playKill, playTimeout, playGeneratorAlert, playCaptureDone, playStormDamage }
 }

@@ -240,7 +240,7 @@ export const RadarOverlay = memo(function RadarOverlay({
       ref={canvasRef}
       width={CANVAS_SIZE}
       height={CANVAS_SIZE}
-      className="absolute top-4 left-4 z-20 pointer-events-none"
+      className="fixed top-4 left-4 z-[60] pointer-events-none"
       aria-hidden="true"
     />
   )
