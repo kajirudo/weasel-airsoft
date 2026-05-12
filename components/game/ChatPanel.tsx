@@ -4,12 +4,14 @@ import { useEffect, useRef } from 'react'
 import { STAMPS, type ChatMessage, type Stamp } from '@/hooks/useGameChat'
 
 interface ChatPanelProps {
-  messages:    ChatMessage[]
-  unreadCount: number
-  isPanelOpen: boolean
-  onOpen:      () => void
-  onClose:     () => void
-  onSendStamp: (stamp: Stamp) => void
+  messages:       ChatMessage[]
+  unreadCount:    number
+  isPanelOpen:    boolean
+  onOpen:         () => void
+  onClose:        () => void
+  onSendStamp:    (stamp: Stamp) => void
+  /** Traitor モード時 true — チャット欄に役職漏洩禁止の警告を表示 */
+  isTraitorMode?: boolean
 }
 
 /**
@@ -18,6 +20,7 @@ interface ChatPanelProps {
  */
 export function ChatPanel({
   messages, unreadCount, isPanelOpen, onOpen, onClose, onSendStamp,
+  isTraitorMode,
 }: ChatPanelProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -31,6 +34,16 @@ export function ChatPanel({
       {/* チャットパネル本体 */}
       {isPanelOpen && (
         <div className="w-52 bg-black/80 backdrop-blur-sm rounded-2xl overflow-hidden flex flex-col">
+          {/* Traitor モード警告バナー */}
+          {isTraitorMode && (
+            <div className="bg-red-900/70 border-b border-red-700 px-3 py-1.5 flex items-center gap-1.5">
+              <span className="text-red-400 text-xs">🕵️</span>
+              <p className="text-red-300 text-[10px] leading-tight font-semibold">
+                役職・情報の送信禁止
+              </p>
+            </div>
+          )}
+
           {/* メッセージログ */}
           <div className="max-h-36 overflow-y-auto px-3 py-2 space-y-1.5 flex flex-col">
             {messages.length === 0 && (

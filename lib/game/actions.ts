@@ -126,6 +126,10 @@ export async function startGame(params: {
   stormRadiusM?:    number
   /** ストーム最終安全圏半径（m） */
   stormFinalM?:     number
+  /** Traitor モード: Traitor 人数 */
+  traitorCount?:    number
+  /** Traitor モード: Sheriff 有効 */
+  sheriffEnabled?:  boolean
 }): Promise<void> {
   const {
     gameId, hitDamage, shootCooldown, durationMinutes,
@@ -156,6 +160,37 @@ export async function startGame(params: {
     }
   }
 
+  // ── Traitor モード: role2 をランダム割り当て ──────────────────────────
+  let traitorTaskGoal = 0
+  if (gameMode === 'traitor') {
+    const { data: allPlayers } = await supabase
+      .from('players').select('id').eq('game_id', gameId)
+    if (allPlayers && allPlayers.length > 0) {
+      const ids      = allPlayers.map(p => p.id)
+      const shuffled = [...ids].sort(() => Math.random() - 0.5)
+      const traitorCount  = params.traitorCount  ?? 1
+      const sheriffEnabled = params.sheriffEnabled ?? false
+
+      const traitorIds = shuffled.slice(0, traitorCount)
+      let   sheriffId: string | null = null
+      if (sheriffEnabled && shuffled.length > traitorCount) {
+        sheriffId = shuffled[traitorCount]
+      }
+
+      // 全員 crew にリセット → Traitor 上書き → Sheriff 上書き
+      await supabase.from('players').update({ role2: 'crew' }).eq('game_id', gameId)
+      if (traitorIds.length > 0) {
+        await supabase.from('players').update({ role2: 'traitor' }).in('id', traitorIds)
+      }
+      if (sheriffId) {
+        await supabase.from('players')
+          .update({ role2: 'sheriff', investigate_uses: 1 })
+          .eq('id', sheriffId)
+      }
+    }
+
+  }
+
   // ── ゲームレコード更新 ─────────────────────────────────────────────────
   const { error } = await supabase.from('games').update({
     status:           'active',
@@ -170,6 +205,10 @@ export async function startGame(params: {
     storm_center_lng: fieldCenterLng ?? null,
     storm_radius_m:   stormRadiusM,   // 初期安全圏（fieldRadiusM とは別）
     storm_final_m:    stormFinalM,
+    // Traitor モード専用
+    traitor_count:    params.traitorCount   ?? 1,
+    sheriff_enabled:  params.sheriffEnabled ?? false,
+    task_goal:        traitorTaskGoal,
   }).eq('id', gameId).eq('status', 'lobby')
   if (error) throw new Error('ゲーム開始に失敗しました')
 
@@ -177,16 +216,22 @@ export async function startGame(params: {
   if (fieldCenterLat != null && fieldCenterLng != null) {
     const { data: players } = await supabase
       .from('players').select('id, role').eq('game_id', gameId)
-    const playerCount  = players?.length ?? 2
+    const playerCount   = players?.length ?? 2
     const survivorCount = players?.filter(p => p.role !== 'hunter').length ?? playerCount
-    await generateObjectivesInternal(supabase, {
+    const genCount = await generateObjectivesInternal(supabase, {
       gameId, centerLat: fieldCenterLat, centerLng: fieldCenterLng,
       radiusM: fieldRadiusM, gameMode, playerCount, survivorCount,
     })
+    // Traitor モード: 生成した発電機の数を task_goal に設定
+    if (gameMode === 'traitor' && genCount > 0) {
+      await supabase.from('games').update({ task_goal: genCount }).eq('id', gameId)
+    }
   }
 }
 
-/** オブジェクトをフィールドにランダム散布する（startGame 内から呼ぶ内部関数） */
+/** オブジェクトをフィールドにランダム散布する（startGame 内から呼ぶ内部関数）
+ *  @returns 生成した generator の個数
+ */
 async function generateObjectivesInternal(
   supabase: ReturnType<typeof createServerClient>,
   params: {
@@ -198,7 +243,7 @@ async function generateObjectivesInternal(
     playerCount:   number
     survivorCount: number
   },
-) {
+): Promise<number> {
   const { gameId, centerLat, centerLng, radiusM, gameMode, playerCount, survivorCount } = params
 
   type ObjInsert = { game_id: string; lat: number; lng: number; type: string }
@@ -209,6 +254,8 @@ async function generateObjectivesInternal(
     ? { generator: survivorCount + 1, medkit: Math.max(1, survivorCount - 1), damage_boost: 2, control_point: 0 }
     : gameMode === 'tactics'
     ? { generator: 0, medkit: 2, damage_boost: 2, control_point: 3 }
+    : gameMode === 'traitor'
+    ? { generator: playerCount + 1, medkit: Math.max(1, playerCount - 1), damage_boost: 0, control_point: 0 }
     : /* battle */
     { generator: 0, medkit: Math.max(1, playerCount - 1), damage_boost: 2, control_point: 0 }
 
@@ -225,6 +272,7 @@ async function generateObjectivesInternal(
   if (inserts.length > 0) {
     await supabase.from('game_objectives').insert(inserts)
   }
+  return counts.generator
 }
 
 export async function createRematch(params: {
@@ -643,5 +691,325 @@ export async function saveKillcamUrl(params: {
     .update({ killcam_url: url })
     .eq('id', targetPlayerId)
     .eq('game_id', gameId)
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  Traitor モード専用アクション
+// ══════════════════════════════════════════════════════════════════════════════
+
+import type { PlayerRole2 } from '@/types/database'
+import { MEETING_DURATION_MS, SABOTAGE_DURATION_MS } from '@/lib/game/constants'
+
+/** 自分の role2 を取得（デバイス ID で本人確認） */
+export async function getMyRole(params: {
+  playerId: string
+  deviceId: string
+}): Promise<{
+  role2:            PlayerRole2
+  meeting_uses:     number
+  investigate_uses: number
+  allTraitorIds:    string[]   // Traitor 本人には仲間の ID を開示
+}> {
+  const { playerId, deviceId } = params
+  const supabase = createServerClient()
+
+  const { data: player } = await supabase.from('players')
+    .select('role2, meeting_uses, investigate_uses, game_id')
+    .eq('id', playerId).eq('device_id', deviceId).single()
+  if (!player) throw new Error('プレイヤーが見つかりません')
+
+  let allTraitorIds: string[] = []
+  if (player.role2 === 'traitor') {
+    // 仲間の Traitor ID を開示（自分も含む）
+    const { data: traitors } = await supabase.from('players')
+      .select('id').eq('game_id', player.game_id).eq('role2', 'traitor')
+    allTraitorIds = traitors?.map(t => t.id) ?? []
+  }
+
+  return {
+    role2:            player.role2 as PlayerRole2,
+    meeting_uses:     player.meeting_uses,
+    investigate_uses: player.investigate_uses,
+    allTraitorIds,
+  }
+}
+
+/** 緊急集会を招集する（ゲーム中に誰でも1回呼べる） */
+export async function callMeeting(params: {
+  gameId:   string
+  callerId: string
+  deviceId: string
+}): Promise<{ meetingId: string }> {
+  const { gameId, callerId, deviceId } = params
+  const supabase = createServerClient()
+
+  // 招集権チェック（meeting_uses > 0 かつ生存）
+  const { data: player } = await supabase.from('players')
+    .select('is_alive, meeting_uses')
+    .eq('id', callerId).eq('device_id', deviceId).eq('game_id', gameId).single()
+  if (!player?.is_alive)       throw new Error('戦闘不能です')
+  if (!player.meeting_uses)    throw new Error('集会を招集する権利がありません')
+
+  // 集会中チェック
+  const { data: game } = await supabase.from('games')
+    .select('status, meeting_id').eq('id', gameId).single()
+  if (!game || game.status !== 'active') throw new Error('ゲーム中ではありません')
+  if (game.meeting_id) throw new Error('すでに集会が進行中です')
+
+  const meetingId    = crypto.randomUUID()
+  const meetingUntil = new Date(Date.now() + MEETING_DURATION_MS).toISOString()
+
+  await Promise.all([
+    supabase.from('players').update({ meeting_uses: player.meeting_uses - 1 })
+      .eq('id', callerId),
+    supabase.from('games').update({ meeting_id: meetingId, meeting_until: meetingUntil })
+      .eq('id', gameId),
+  ])
+
+  return { meetingId }
+}
+
+/** 投票を送信し、全員投票済みなら即座に集計する */
+export async function submitVote(params: {
+  gameId:    string
+  voterId:   string
+  deviceId:  string
+  targetId:  string | null   // null = スキップ
+}): Promise<{
+  resolved:   boolean
+  voteCount?: number
+  total?:     number
+  exileId?:   string | null
+  exileRole?: PlayerRole2 | null
+  gameOver?:  boolean
+  winner?:    string | null
+}> {
+  const { gameId, voterId, deviceId, targetId } = params
+  const supabase = createServerClient()
+
+  const { data: game } = await supabase.from('games')
+    .select('meeting_id, meeting_until, status').eq('id', gameId).single()
+  if (!game?.meeting_id) throw new Error('集会が進行中ではありません')
+  const meetingId = game.meeting_id
+
+  // 本人確認
+  const { data: voter } = await supabase.from('players')
+    .select('is_alive').eq('id', voterId).eq('device_id', deviceId).eq('game_id', gameId).single()
+  if (!voter?.is_alive) throw new Error('戦闘不能です')
+
+  // 投票を記録（同じ集会では上書き可能）
+  await supabase.from('traitor_votes').upsert(
+    { game_id: gameId, meeting_id: meetingId, voter_id: voterId, target_id: targetId },
+    { onConflict: 'meeting_id,voter_id' }
+  )
+
+  // 全生存者数 vs 投票数
+  const { count: aliveCount } = await supabase.from('players')
+    .select('*', { count: 'exact', head: true })
+    .eq('game_id', gameId).eq('is_alive', true)
+  const { count: voteCount } = await supabase.from('traitor_votes')
+    .select('*', { count: 'exact', head: true })
+    .eq('meeting_id', meetingId)
+
+  const total = aliveCount ?? 0
+  const voted = voteCount ?? 0
+  const timeUp = new Date() >= new Date(game.meeting_until ?? '')
+
+  if (voted < total && !timeUp) {
+    return { resolved: false, voteCount: voted, total }
+  }
+
+  // 集計
+  return resolveMeetingInternal(supabase, gameId, meetingId)
+}
+
+/** ホストが時間切れを検知して集計を強制実行する */
+export async function resolveMeeting(params: {
+  gameId:   string
+  hostId:   string
+  deviceId: string
+}): Promise<{
+  resolved:  boolean
+  exileId?:  string | null
+  exileRole?: PlayerRole2 | null
+  gameOver?: boolean
+  winner?:   string | null
+}> {
+  const { gameId, hostId, deviceId } = params
+  const supabase = createServerClient()
+
+  const { data: game } = await supabase.from('games')
+    .select('meeting_id, meeting_until, status').eq('id', gameId).single()
+  if (!game?.meeting_id || game.status !== 'active') return { resolved: false }
+
+  // 期限チェック
+  if (new Date() < new Date(game.meeting_until ?? '')) return { resolved: false }
+
+  // 本人確認（+ game_id で所属ゲームも検証）
+  const { data: player } = await supabase.from('players')
+    .select('id').eq('id', hostId).eq('device_id', deviceId).eq('game_id', gameId).single()
+  if (!player) throw new Error('認証エラー')
+
+  return resolveMeetingInternal(supabase, gameId, game.meeting_id)
+}
+
+async function resolveMeetingInternal(
+  supabase:  ReturnType<typeof createServerClient>,
+  gameId:    string,
+  meetingId: string,
+): Promise<{
+  resolved:  boolean
+  exileId?:  string | null
+  exileRole?: PlayerRole2 | null
+  gameOver?: boolean
+  winner?:   string | null
+}> {
+  // 最多票のプレイヤーを追放
+  const { data: votes } = await supabase.from('traitor_votes')
+    .select('target_id').eq('meeting_id', meetingId).not('target_id', 'is', null)
+
+  let exileId: string | null = null
+  if (votes && votes.length > 0) {
+    const tally = new Map<string, number>()
+    for (const v of votes) {
+      if (v.target_id) tally.set(v.target_id, (tally.get(v.target_id) ?? 0) + 1)
+    }
+    const sorted = [...tally.entries()].sort((a, b) => b[1] - a[1])
+    // 同票の場合は追放なし（スキップ相当）
+    if (sorted.length > 0 && (sorted.length === 1 || sorted[0][1] > sorted[1][1])) {
+      exileId = sorted[0][0]
+    }
+  }
+
+  let exileRole: PlayerRole2 | null = null
+  if (exileId) {
+    const { data: exiled } = await supabase.from('players')
+      .select('role2').eq('id', exileId).single()
+    exileRole = (exiled?.role2 ?? null) as PlayerRole2 | null
+    await supabase.from('players')
+      .update({ is_alive: false, killer_name: '集会で追放' }).eq('id', exileId)
+  }
+
+  // 集会を閉じる（meeting_id 条件付き UPDATE = 二重実行防止）
+  const { data: closedRows } = await supabase.from('games')
+    .update({ meeting_id: null, meeting_until: null })
+    .eq('id', gameId).eq('meeting_id', meetingId)
+    .select('id')
+  // 他のクライアントが先に集会を閉じていた場合（0行更新）は中断
+  if (!closedRows?.length) return { resolved: false }
+
+  // 勝利判定
+  const { count: traitorAlive } = await supabase.from('players')
+    .select('*', { count: 'exact', head: true })
+    .eq('game_id', gameId).eq('is_alive', true).eq('role2', 'traitor')
+  const { count: crewAlive } = await supabase.from('players')
+    .select('*', { count: 'exact', head: true })
+    .eq('game_id', gameId).eq('is_alive', true).neq('role2', 'traitor')
+
+  let gameOver = false
+  let winner: string | null = null
+  const ta = traitorAlive ?? 0
+  const ca = crewAlive ?? 0
+
+  if (ta === 0)       { gameOver = true; winner = 'crew' }
+  else if (ta >= ca)  { gameOver = true; winner = 'traitor' }
+
+  if (gameOver) {
+    await supabase.from('games')
+      .update({ status: 'finished', finished_at: new Date().toISOString(), winner_team: winner })
+      .eq('id', gameId)
+  }
+
+  return { resolved: true, exileId, exileRole, gameOver, winner }
+}
+
+/** Traitor の妨害（Comms Sabotage: 全員のレーダーを20秒間無効化） */
+export async function useSabotage(params: {
+  gameId:   string
+  playerId: string
+  deviceId: string
+}): Promise<void> {
+  const { gameId, playerId, deviceId } = params
+  const supabase = createServerClient()
+
+  const { data: player } = await supabase.from('players')
+    .select('role2, is_alive').eq('id', playerId).eq('device_id', deviceId).single()
+  if (!player?.is_alive)         throw new Error('戦闘不能です')
+  if (player.role2 !== 'traitor') throw new Error('Traitor 専用能力です')
+
+  const { data: game } = await supabase.from('games')
+    .select('status, sabotage_until').eq('id', gameId).single()
+  if (game?.status !== 'active') throw new Error('ゲーム中ではありません')
+  if (game.sabotage_until && new Date() < new Date(game.sabotage_until)) {
+    throw new Error('妨害はまだクールダウン中です')
+  }
+
+  const until = new Date(Date.now() + SABOTAGE_DURATION_MS).toISOString()
+  await supabase.from('games')
+    .update({ sabotage_type: 'comms', sabotage_until: until }).eq('id', gameId)
+}
+
+/** Sheriff の調査（対象の role2 を確認する） */
+export async function investigatePlayer(params: {
+  gameId:    string
+  sheriffId: string
+  deviceId:  string
+  targetId:  string
+}): Promise<{ role2: PlayerRole2 }> {
+  const { gameId, sheriffId, deviceId, targetId } = params
+  const supabase = createServerClient()
+
+  const { data: sheriff } = await supabase.from('players')
+    .select('role2, is_alive, investigate_uses, lat, lng')
+    .eq('id', sheriffId).eq('device_id', deviceId).eq('game_id', gameId).single()
+  if (!sheriff?.is_alive)              throw new Error('戦闘不能です')
+  if (sheriff.role2 !== 'sheriff')     throw new Error('Sheriff 専用能力です')
+  if (!sheriff.investigate_uses)       throw new Error('調査回数を使い切りました')
+
+  const { data: target } = await supabase.from('players')
+    .select('role2, is_alive, lat, lng').eq('id', targetId).eq('game_id', gameId).single()
+  if (!target?.is_alive) throw new Error('対象は戦闘不能です')
+
+  // GPS 近接チェック（位置情報がある場合のみ）
+  if (sheriff.lat != null && target.lat != null) {
+    const dlat = (sheriff.lat - target.lat) * 111_320
+    const dlng = (sheriff.lng - target.lng) * 111_320 * Math.cos(sheriff.lat * Math.PI / 180)
+    const dist = Math.sqrt(dlat ** 2 + dlng ** 2)
+    if (dist > 15) throw new Error(`対象が遠すぎます（${Math.round(dist)}m）`)
+  }
+
+  await supabase.from('players')
+    .update({ investigate_uses: sheriff.investigate_uses - 1 }).eq('id', sheriffId)
+
+  return { role2: target.role2 as PlayerRole2 }
+}
+
+/**
+ * タスク完了 — Migration 012 の complete_mission RPC を呼ぶことで
+ * task_done インクリメントをサーバー側で FOR UPDATE + RETURNING によりアトミックに実行する。
+ * JS 側で SELECT → UPDATE すると Lost Update が起きるため RPC に委譲する。
+ */
+export async function completeMission(params: {
+  objectiveId: string
+  playerId:    string
+  deviceId:    string
+  gameId:      string
+}): Promise<{ taskDone: number; taskGoal: number; crewWins: boolean }> {
+  const { objectiveId, playerId, deviceId, gameId } = params
+  const supabase = createServerClient()
+
+  const { data, error } = await supabase.rpc('complete_mission', {
+    p_objective_id: objectiveId,
+    p_player_id:    playerId,
+    p_device_id:    deviceId,
+    p_game_id:      gameId,
+  })
+  if (error) throw new Error(error.message)
+
+  return {
+    taskDone:  (data as { taskDone: number; taskGoal: number; crewWins: boolean }).taskDone,
+    taskGoal:  (data as { taskDone: number; taskGoal: number; crewWins: boolean }).taskGoal,
+    crewWins:  (data as { taskDone: number; taskGoal: number; crewWins: boolean }).crewWins,
+  }
 }
 

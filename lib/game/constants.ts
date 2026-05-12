@@ -52,6 +52,25 @@ export const GAME_MODE_LABELS: Record<GameMode, string> = {
   battle:   '🌀 バトル（縮小マップ）',
   survival: '🔦 サバイバル（Hunter vs Survivors）',
   tactics:  '🏴 タクティクス（拠点争奪）',
+  traitor:  '🕵️ Traitor（Among Us型 心理戦）',
+}
+
+// ── Traitor モード ─────────────────────────────────────────────────────────
+export const MEETING_DURATION_MS    = 60_000   // 集会の長さ（ms）
+export const SABOTAGE_DURATION_MS   = 20_000   // Comms 妨害の継続時間（ms）
+export const INVESTIGATE_RADIUS_M   = 15       // Sheriff の調査可能距離（m）
+export const TASK_HOLD_MS           = 10_000   // タスク完了に必要なホールド時間（ms）
+
+export const ROLE2_LABELS: Record<import('@/types/database').PlayerRole2, string> = {
+  crew:    'CREW',
+  traitor: 'TRAITOR',
+  sheriff: 'SHERIFF',
+}
+
+export const ROLE2_COLORS: Record<import('@/types/database').PlayerRole2, string> = {
+  crew:    '#22c55e',
+  traitor: '#ef4444',
+  sheriff: '#f59e0b',
 }
 
 // ── オブジェクト近接判定（m） ─────────────────────────────────────────────────

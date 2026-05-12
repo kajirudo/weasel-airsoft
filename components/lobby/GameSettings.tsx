@@ -13,6 +13,9 @@ export interface GameSettingsValues {
   stormRadiusM:    number   // 初期安全圏半径（バトルモード）
   stormFinalM:     number   // 最終安全圏半径（バトルモード）
   fieldRadiusM:    number   // オブジェクト散布半径
+  // Traitor モード
+  traitorCount:    number
+  sheriffEnabled:  boolean
 }
 
 interface GameSettingsProps extends GameSettingsValues {
@@ -52,18 +55,20 @@ function SliderField({
 export function GameSettings({
   hitDamage, shootCooldown, durationMinutes, teamMode, markerMode,
   gameMode, stormRadiusM, stormFinalM, fieldRadiusM,
+  traitorCount, sheriffEnabled,
   onChange,
 }: GameSettingsProps) {
   const set = (partial: Partial<GameSettingsValues>) =>
     onChange({
       hitDamage, shootCooldown, durationMinutes, teamMode, markerMode,
       gameMode, stormRadiusM, stormFinalM, fieldRadiusM,
+      traitorCount, sheriffEnabled,
       ...partial,
     })
 
   function handleGameModeChange(mode: GameMode) {
-    // タクティクスはチームモード強制オン
-    const newTeamMode = mode === 'tactics' ? true : teamMode
+    // タクティクスはチームモード強制オン、Traitor はチームモード無効
+    const newTeamMode = mode === 'tactics' ? true : mode === 'traitor' ? false : teamMode
     set({ gameMode: mode, teamMode: newTeamMode })
   }
 
@@ -94,8 +99,49 @@ export function GameSettings({
           {gameMode === 'battle'   && 'GPS 安全圏が時間経過とともに縮小。圏外でダメージ。'}
           {gameMode === 'survival' && '1人の Hunter vs 複数 Survivors。発電機を全起動で Survivor 勝利。'}
           {gameMode === 'tactics'  && '3拠点をチームで奪い合う。時間終了時に拠点得点が多い方が勝利。'}
+          {gameMode === 'traitor'  && '中に潜む Traitor を投票で追放せよ。タスク完了か全員追放で Crew 勝利。'}
         </p>
       </div>
+
+      {/* ── Traitor モード専用設定 ─────────────────────────────────────── */}
+      {gameMode === 'traitor' && (
+        <div className="space-y-3 border border-red-900/50 rounded-lg p-3 bg-red-900/10">
+          <p className="text-red-400 text-xs font-semibold">🕵️ Traitor 設定</p>
+          <SliderField
+            label="Traitor 人数" value={traitorCount} min={1} max={2} step={1}
+            displayValue={`${traitorCount}人`}
+            onChange={(v) => set({ traitorCount: v })}
+          />
+          <p className="text-gray-600 text-xs">
+            参加人数の 1/4 程度を目安にしてください（4人→1人、6人→1〜2人）
+          </p>
+          {/* Sheriff 有効 */}
+          <label className="flex items-center justify-between cursor-pointer select-none">
+            <div>
+              <span className="text-gray-400 text-xs">Sheriff を有効にする</span>
+              <p className="text-gray-600 text-xs mt-0.5">🔰 特殊能力で Crew の中から1人選出</p>
+            </div>
+            <div
+              onClick={() => set({ sheriffEnabled: !sheriffEnabled })}
+              className={`w-10 h-6 rounded-full transition-colors relative cursor-pointer ${
+                sheriffEnabled ? 'bg-yellow-600' : 'bg-gray-700'
+              }`}
+            >
+              <span
+                className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${sheriffEnabled ? 'left-5' : 'left-1'}`}
+              />
+            </div>
+          </label>
+          <SliderField
+            label="オブジェクト散布半径" value={fieldRadiusM} min={20} max={200} step={10}
+            displayValue={`${fieldRadiusM}m`}
+            onChange={(v) => set({ fieldRadiusM: v })}
+          />
+          <p className="text-gray-600 text-xs">
+            ホストの GPS 位置を中心に発電機・アイテムを散布します。
+          </p>
+        </div>
+      )}
 
       {/* ── バトルモード専用: ストーム設定 ──────────────────────────────────── */}
       {gameMode === 'battle' && (
@@ -183,12 +229,15 @@ export function GameSettings({
           {gameMode === 'tactics' && (
             <p className="text-yellow-700 text-xs mt-0.5">タクティクスは必須</p>
           )}
+          {gameMode === 'traitor' && (
+            <p className="text-red-700 text-xs mt-0.5">Traitor モードは無効</p>
+          )}
         </div>
         <div
-          onClick={() => gameMode !== 'tactics' && set({ teamMode: !teamMode })}
+          onClick={() => gameMode !== 'tactics' && gameMode !== 'traitor' && set({ teamMode: !teamMode })}
           className={`w-10 h-6 rounded-full transition-colors relative ${
             teamMode ? 'bg-green-600' : 'bg-gray-700'
-          } ${gameMode === 'tactics' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+          } ${(gameMode === 'tactics' || gameMode === 'traitor') ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
         >
           <span
             className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${teamMode ? 'left-5' : 'left-1'}`}
@@ -201,6 +250,7 @@ export function GameSettings({
         {durationMinutes > 0 && gameMode === 'battle'   && <p>時間切れ → ストームダメージで最後の生存者が勝利</p>}
         {durationMinutes > 0 && gameMode === 'survival' && <p>時間切れ → Survivor 勝利</p>}
         {durationMinutes > 0 && gameMode === 'tactics'  && <p>時間切れ → 獲得ポイントが多いチームが勝利</p>}
+        {durationMinutes > 0 && gameMode === 'traitor'  && <p>時間切れ → タスク未完なら Traitor 勝利</p>}
         {durationMinutes > 0 && gameMode === 'battle' && !teamMode && <p>最後の生存者が勝利</p>}
       </div>
     </div>

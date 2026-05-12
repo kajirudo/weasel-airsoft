@@ -1,10 +1,12 @@
-export type GameStatus   = 'lobby' | 'active' | 'finished'
-export type QrCodeId    = 'player_1' | 'player_2' | 'player_3' | 'player_4' | 'player_5' | 'player_6'
-export type Team        = 'none' | 'red' | 'blue'
-export type MarkerMode  = 'qr' | 'aruco'
-export type GameMode    = 'battle' | 'survival' | 'tactics'
-export type PlayerRole  = 'survivor' | 'hunter'
+export type GameStatus    = 'lobby' | 'active' | 'finished'
+export type QrCodeId     = 'player_1' | 'player_2' | 'player_3' | 'player_4' | 'player_5' | 'player_6'
+export type Team         = 'none' | 'red' | 'blue'
+export type MarkerMode   = 'qr' | 'aruco'
+export type GameMode     = 'battle' | 'survival' | 'tactics' | 'traitor'
+export type PlayerRole   = 'survivor' | 'hunter'
+export type PlayerRole2  = 'crew' | 'traitor' | 'sheriff'
 export type ObjectiveType = 'medkit' | 'damage_boost' | 'generator' | 'control_point'
+export type SabotageType = 'comms'
 
 export interface Game {
   id:               string
@@ -13,7 +15,7 @@ export interface Game {
   started_at:       string | null
   finished_at:      string | null
   winner_id:        string | null
-  winner_team:      string | null   // 'red'|'blue'|'hunter'|'survivor'|null
+  winner_team:      string | null   // 'red'|'blue'|'hunter'|'survivor'|'crew'|'traitor'|null
   hit_damage:       number
   shoot_cooldown:   number
   short_code:       string | null
@@ -21,39 +23,62 @@ export interface Game {
   next_game_id:     string | null
   team_mode:        boolean
   marker_mode:      MarkerMode
-  // ── 3モード ──────────────────────────────────────────────────────────────
+  // ── ゲームモード ──────────────────────────────────────────────────────────
   game_mode:        GameMode
   // バトルモード（ストーム）
   storm_center_lat: number | null
   storm_center_lng: number | null
-  storm_radius_m:   number           // 初期安全圏半径（m）
-  storm_final_m:    number           // 最終安全圏半径（m）
+  storm_radius_m:   number
+  storm_final_m:    number
   // タクティクスモード（スコア）
   score_red:        number
   score_blue:       number
+  // Traitor モード
+  traitor_count:    number
+  sheriff_enabled:  boolean
+  task_goal:        number
+  task_done:        number
+  meeting_id:       string | null   // 進行中の集会UUID
+  meeting_until:    string | null   // 集会終了 ISO 文字列
+  sabotage_type:    SabotageType | null
+  sabotage_until:   string | null
 }
 
 export interface Player {
-  id:           string
-  game_id:      string
-  name:         string
-  hp:           number
-  qr_code_id:   QrCodeId
-  device_id:    string
-  is_alive:     boolean
-  joined_at:    string
-  last_seen:    string
-  last_shot_at: string | null
-  kills:        number
-  team:         Team
-  killer_name:  string | null
-  killcam_url:  string | null
-  lat:          number | null
-  lng:          number | null
-  heading:      number | null
-  // 3モード追加
-  role:         PlayerRole
-  damage_boost: boolean
+  id:               string
+  game_id:          string
+  name:             string
+  hp:               number
+  qr_code_id:       QrCodeId
+  device_id:        string
+  is_alive:         boolean
+  joined_at:        string
+  last_seen:        string
+  last_shot_at:     string | null
+  kills:            number
+  team:             Team
+  killer_name:      string | null
+  killcam_url:      string | null
+  lat:              number | null
+  lng:              number | null
+  heading:          number | null
+  // 3モード
+  role:             PlayerRole
+  damage_boost:     boolean
+  // Traitor モード
+  role2:            PlayerRole2
+  tasks_done:       number
+  meeting_uses:     number
+  investigate_uses: number
+}
+
+export interface TraitorVote {
+  id:         string
+  game_id:    string
+  meeting_id: string
+  voter_id:   string
+  target_id:  string | null   // null = スキップ
+  created_at: string
 }
 
 export interface GameObjective {

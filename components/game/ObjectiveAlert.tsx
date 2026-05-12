@@ -14,6 +14,7 @@ import {
   claimObjective,
   beginGenerator,
   completeGenerator,
+  completeMission,
   cancelGenerator,
   beginCapture,
   completeCapture,
@@ -28,6 +29,8 @@ interface Props {
   session:   LocalPlayerSession | null
   gameId:    string
   team:      'red' | 'blue' | 'none'
+  /** traitor モードかどうか（発電機完了時に completeMission を呼ぶ） */
+  isTraitorMode?: boolean
   /** 占領完了時に呼ばれるコールバック（サウンド再生用） */
   onCaptureDone?: () => void
   /** 発電機起動完了時に呼ばれるコールバック */
@@ -134,7 +137,7 @@ function HoldButton({
 // ── メインコンポーネント ────────────────────────────────────────────────────────
 export function ObjectiveAlert({
   nearby, session, gameId, team,
-  onCaptureDone, onGeneratorDone,
+  isTraitorMode, onCaptureDone, onGeneratorDone,
 }: Props) {
   const [busy,    setBusy]    = useState(false)
   const [message, setMessage] = useState<string | null>(null)
@@ -181,16 +184,28 @@ export function ObjectiveAlert({
     const obj = genRef.current
     if (!session || !obj) return
     try {
-      const { allActivated } = await completeGenerator({
-        objectiveId: obj.id, playerId: session.playerId,
-        deviceId: session.deviceId, gameId,
-      })
-      onGeneratorDone?.()
-      setMessage(allActivated ? '🔋 全発電機起動！Survivor 勝利！' : '🔋 発電機起動！')
+      if (isTraitorMode) {
+        // Traitor モード: task_done をインクリメントして Crew 勝利を判定
+        const { taskDone, taskGoal, crewWins } = await completeMission({
+          objectiveId: obj.id, playerId: session.playerId,
+          deviceId: session.deviceId, gameId,
+        })
+        onGeneratorDone?.()
+        setMessage(crewWins
+          ? `🔋 全タスク完了（${taskDone}/${taskGoal}）！Crew 勝利！`
+          : `🔋 タスク完了（${taskDone}/${taskGoal}）`)
+      } else {
+        const { allActivated } = await completeGenerator({
+          objectiveId: obj.id, playerId: session.playerId,
+          deviceId: session.deviceId, gameId,
+        })
+        onGeneratorDone?.()
+        setMessage(allActivated ? '🔋 全発電機起動！Survivor 勝利！' : '🔋 発電機起動！')
+      }
     } catch (e: unknown) {
       setMessage(`❌ ${e instanceof Error ? e.message : 'エラー'}`)
     }
-  }, [session, gameId, onGeneratorDone])
+  }, [session, gameId, isTraitorMode, onGeneratorDone])
 
   const handleGenCancel = useCallback(async () => {
     const obj = genRef.current

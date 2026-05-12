@@ -1,7 +1,7 @@
 'use client'
 
-import type { Player, QrCodeId, Team } from '@/types/database'
-import { MAX_HP, QR_LABELS } from '@/lib/game/constants'
+import type { Player, QrCodeId, Team, GameMode, PlayerRole2 } from '@/types/database'
+import { MAX_HP, QR_LABELS, ROLE2_COLORS, ROLE2_LABELS } from '@/lib/game/constants'
 
 const TEAM_COLOR: Record<Team, string> = {
   none: '',
@@ -21,14 +21,33 @@ function hpColor(hp: number): string {
   return 'bg-red-500'
 }
 
+/** Traitor モード: 死亡者のロールバッジ（role2 が公開される） */
+function Role2Badge({ role2 }: { role2: PlayerRole2 }) {
+  return (
+    <span
+      className="text-[9px] font-black px-1 rounded leading-none"
+      style={{
+        backgroundColor: ROLE2_COLORS[role2] + '33',  // 20% 透明
+        color:            ROLE2_COLORS[role2],
+        border:           `1px solid ${ROLE2_COLORS[role2]}88`,
+      }}
+    >
+      {ROLE2_LABELS[role2]}
+    </span>
+  )
+}
+
 interface HpOverlayProps {
   selfPlayer: Player
   allPlayers: Player[]
+  /** ゲームモード（traitor 時に死亡者の role2 を表示） */
+  gameMode?:  GameMode
 }
 
-export function HpOverlay({ selfPlayer, allPlayers }: HpOverlayProps) {
-  const enemies = allPlayers.filter((p) => p.id !== selfPlayer.id)
-  const isTeamMode = selfPlayer.team !== 'none'
+export function HpOverlay({ selfPlayer, allPlayers, gameMode }: HpOverlayProps) {
+  const enemies      = allPlayers.filter((p) => p.id !== selfPlayer.id)
+  const isTeamMode   = selfPlayer.team !== 'none'
+  const isTraitor    = gameMode === 'traitor'
 
   return (
     <>
@@ -63,32 +82,45 @@ export function HpOverlay({ selfPlayer, allPlayers }: HpOverlayProps) {
       {/* 相手のHP一覧 — 右上 */}
       {enemies.length > 0 && (
         <div className="absolute top-16 right-4 pointer-events-none flex flex-col gap-2">
-          {enemies.map((p) => (
-            <div
-              key={p.id}
-              className={`bg-black/60 rounded-lg px-2 py-1 backdrop-blur-sm ${TEAM_BAR[p.team]} ${!p.is_alive ? 'opacity-40' : ''}`}
-            >
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-mono text-gray-400">{QR_LABELS[p.qr_code_id]}</span>
-                {isTeamMode && (
-                  <span className={`text-xs ${TEAM_COLOR[p.team]}`}>
-                    {p.team === 'red' ? '🔴' : '🔵'}
-                  </span>
-                )}
-                <span className="text-white text-xs truncate max-w-[52px]">{p.name}</span>
-                {p.kills > 0 && (
-                  <span className="text-yellow-400 text-xs font-mono">💀{p.kills}</span>
-                )}
-                <div className="w-14 h-2 bg-gray-700 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-300 ${hpColor(p.hp)}`}
-                    style={{ width: `${(p.hp / MAX_HP) * 100}%` }}
-                  />
+          {enemies.map((p) => {
+            const isDead       = !p.is_alive
+            // Traitor モードでは死亡者のロールを公開
+            const showRole2    = isTraitor && isDead
+            return (
+              <div
+                key={p.id}
+                className={`bg-black/60 rounded-lg px-2 py-1 backdrop-blur-sm ${TEAM_BAR[p.team]} ${isDead ? 'opacity-40' : ''}`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-mono text-gray-400">{QR_LABELS[p.qr_code_id as QrCodeId]}</span>
+                  {isTeamMode && (
+                    <span className={`text-xs ${TEAM_COLOR[p.team]}`}>
+                      {p.team === 'red' ? '🔴' : '🔵'}
+                    </span>
+                  )}
+                  <span className="text-white text-xs truncate max-w-[52px]">{p.name}</span>
+                  {p.kills > 0 && (
+                    <span className="text-yellow-400 text-xs font-mono">💀{p.kills}</span>
+                  )}
+                  {/* 死亡者のロールバッジ（Traitor モードのみ） */}
+                  {showRole2 && (
+                    <Role2Badge role2={p.role2} />
+                  )}
+                  {!showRole2 && (
+                    <>
+                      <div className="w-14 h-2 bg-gray-700 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-300 ${hpColor(p.hp)}`}
+                          style={{ width: `${(p.hp / MAX_HP) * 100}%` }}
+                        />
+                      </div>
+                      <span className="text-xs font-mono text-white w-5 text-right">{p.hp}</span>
+                    </>
+                  )}
                 </div>
-                <span className="text-xs font-mono text-white w-5 text-right">{p.hp}</span>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </>

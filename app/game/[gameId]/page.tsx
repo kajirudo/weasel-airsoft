@@ -17,6 +17,10 @@ import { RadarOverlay }          from '@/components/game/RadarOverlay'
 import { StormOverlay }          from '@/components/game/StormOverlay'
 import { ObjectiveAlert }        from '@/components/game/ObjectiveAlert'
 import { TacticsScore }          from '@/components/game/TacticsScore'
+import { RoleReveal }            from '@/components/game/RoleReveal'
+import { TaskProgress }          from '@/components/game/TaskProgress'
+import { SpecialRoleHUD }        from '@/components/game/SpecialRoleHUD'
+import { MeetingOverlay }        from '@/components/game/MeetingOverlay'
 import { Button }                from '@/components/ui/Button'
 import { ShareGameId }           from '@/components/lobby/ShareGameId'
 import { GameSettings, type GameSettingsValues } from '@/components/lobby/GameSettings'
@@ -33,13 +37,17 @@ import { useKillcam }            from '@/hooks/useKillcam'
 import { useRadar }              from '@/hooks/useRadar'
 import { useObjectives }         from '@/hooks/useObjectives'
 import { useStorm }              from '@/hooks/useStorm'
-import { registerHit, startGame, finishGameByTimeout, saveKillcamUrl, commitTacticsScore } from '@/lib/game/actions'
+import { useMeeting }            from '@/hooks/useMeeting'
+import {
+  registerHit, startGame, finishGameByTimeout, saveKillcamUrl, commitTacticsScore,
+  getMyRole, callMeeting, submitVote, resolveMeeting, useSabotage, investigatePlayer,
+} from '@/lib/game/actions'
 import { isHostPlayer } from '@/lib/game/utils'
 import { compositeKillcam }      from '@/lib/game/killcam-capture'
 import { createClient }          from '@/lib/supabase/client'
-import { MAX_HP, HIT_DAMAGE, STICKY_GRACE_MS, AUTO_FIRE_HOLD_MS, SCORE_COMMIT_MS } from '@/lib/game/constants'
+import { MAX_HP, HIT_DAMAGE, STICKY_GRACE_MS, AUTO_FIRE_HOLD_MS, SCORE_COMMIT_MS, INVESTIGATE_RADIUS_M } from '@/lib/game/constants'
 import type { DetectedQR, LocalPlayerSession } from '@/types/game'
-import type { Player, QrCodeId, MarkerMode, GameMode } from '@/types/database'
+import type { Player, QrCodeId, MarkerMode, GameMode, PlayerRole2 } from '@/types/database'
 
 const DEFAULT_SHOOT_COOLDOWN = 800
 
@@ -60,11 +68,23 @@ export default function GamePage() {
     stormRadiusM:    80,
     stormFinalM:     15,
     fieldRadiusM:    80,
+    traitorCount:    1,
+    sheriffEnabled:  false,
   })
 
   // ゲームレコードから markerMode を初期化（game が読み込まれた時点で同期）
   const markerModeSyncedRef = useRef(false)
   const lastShotRef = useRef(0)
+
+  // ── Traitor モード固有の状態 ──────────────────────────────────────────────
+  const [myRole2, setMyRole2]               = useState<PlayerRole2 | null>(null)
+  const [traitorNames, setTraitorNames]     = useState<string[]>([])
+  const [showRoleReveal, setShowRoleReveal] = useState(false)
+  const roleRevealDoneRef = useRef(false)
+  const [meetingResult, setMeetingResult]   = useState<{
+    exileId: string | null; exileRole: string | null; gameOver: boolean; winner: string | null
+  } | null>(null)
+  const [callingMeeting, setCallingMeeting] = useState(false)
 
   // ── オートファイア / スティッキー検知 ──────────────────────────────────────
   const [autoFireEnabled, setAutoFireEnabled] = useState(() => {
@@ -126,6 +146,27 @@ export default function GamePage() {
     deviceId:   session?.deviceId,
     gameStatus: game?.status,
   })
+
+  // ── Traitor: ゲームが active になったら自分の role2 を取得 ──────────────────
+  useEffect(() => {
+    if (game?.status !== 'active' || game?.game_mode !== 'traitor') return
+    if (!session || roleRevealDoneRef.current) return
+    ;(async () => {
+      try {
+        const result = await getMyRole({ playerId: session.playerId, deviceId: session.deviceId })
+        setMyRole2(result.role2)
+        // players がロード済みなら名前解決、なければ ID だけ保存して後で解決
+        setTraitorNames(
+          result.allTraitorIds
+            .map(id => players.find(p => p.id === id)?.name ?? id)
+            .filter(Boolean),
+        )
+        setShowRoleReveal(true)
+        roleRevealDoneRef.current = true
+      } catch { /* ignore */ }
+    })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game?.status, game?.game_mode, session])
 
   // ミニマップ用 GPS 追跡（ゲーム中のみ有効）
   const { geoPos, gpsAvailable } = useRadar({ session, enabled: game?.status === 'active' || game?.status === 'lobby' })
@@ -208,6 +249,38 @@ export default function GamePage() {
     }, [triggerStormFlash, playStormDamage]),
   })
 
+  // ── 集会（Traitor モード） ────────────────────────────────────────────────
+  const meeting = useMeeting({
+    game,
+    selfPlayer,
+    onResolved: useCallback((result: { exileId: string | null; exileRole: string | null; gameOver: boolean; winner: string | null }) => {
+      setMeetingResult(result)
+    }, []),
+  })
+
+  // GPS: Sheriff の調査用 最近接プレイヤー（自分以外）
+  const { nearestCrewDist, nearestCrewId } = (() => {
+    if (!geoPos || !selfPlayer || game?.game_mode !== 'traitor') {
+      return { nearestCrewDist: null as number | null, nearestCrewId: null as string | null }
+    }
+    const mPerDegLat = 111_320
+    const mPerDegLng = 111_320 * Math.cos(geoPos.lat * Math.PI / 180)
+    let minDist = Infinity
+    let minId: string | null = null
+    for (const p of players) {
+      if (p.id === selfPlayer.id || !p.is_alive || p.lat == null || p.lng == null) continue
+      const d = Math.sqrt(
+        ((p.lat - geoPos.lat) * mPerDegLat) ** 2 +
+        ((p.lng - geoPos.lng) * mPerDegLng) ** 2,
+      )
+      if (d < minDist) { minDist = d; minId = p.id }
+    }
+    return {
+      nearestCrewDist: minId !== null ? minDist : null,
+      nearestCrewId:   minId,
+    }
+  })()
+
   // 拠点の nearbyTeamCount を GPS で計算して注入（selfPlayer 確定後）
   const selfTeam = selfPlayer?.team ?? 'none'
   const nearbyObjectivesWithBonus = {
@@ -248,6 +321,8 @@ export default function GamePage() {
     if (!session) return
     if (targetQrCodeId === session.qrCodeId) return
     if (isOffline || cdBlock || game?.status !== 'active') return
+    // 集会中は射撃禁止（サーバー側でも弾かれるが、無駄な RPC 呼び出しを防ぐ）
+    if (game?.meeting_id) return
 
     const now = Date.now()
     if (now - lastShotRef.current < shootCooldown) return
@@ -431,6 +506,8 @@ export default function GamePage() {
         fieldCenterLat:   geoPos?.lat ?? undefined,
         fieldCenterLng:   geoPos?.lng ?? undefined,
         fieldRadiusM:     balanceSettings.fieldRadiusM,
+        traitorCount:     balanceSettings.traitorCount,
+        sheriffEnabled:   balanceSettings.sheriffEnabled,
       })
     } catch { setIsStarting(false) }
   }
@@ -468,7 +545,13 @@ export default function GamePage() {
           />
           <HitFlash isFlashing={isFlashing} color={flashColor} />
           {isActive && <TimerDisplay remainingSeconds={remainingSeconds} />}
-          {selfPlayer && <HpOverlay selfPlayer={selfPlayer} allPlayers={players} />}
+          {selfPlayer && (
+            <HpOverlay
+              selfPlayer={selfPlayer}
+              allPlayers={players}
+              gameMode={game?.game_mode}
+            />
+          )}
 
           {/* ─── チャージリング（オートファイア中） ──────────────────────── */}
           {isActive && autoFireEnabled && stickyInReticle && !isOffline && !cdBlock && (
@@ -511,8 +594,9 @@ export default function GamePage() {
       {/* カウントダウンオーバーレイ（死亡後スペクテイター上にも表示） */}
       <CountdownOverlay phase={cdPhase} count={cdCount} />
 
-      {/* ミニマップ（ゲーム中、死亡スペクテイター含む） */}
-      {isActive && session && (
+      {/* ミニマップ（ゲーム中、死亡スペクテイター含む）
+          Comms サボタージュ中はレーダー非表示 */}
+      {isActive && session && !(game?.sabotage_type === 'comms' && game.sabotage_until && new Date(game.sabotage_until) > new Date()) && (
         <RadarOverlay
           selfPlayerId={session.playerId}
           players={players}
@@ -546,8 +630,120 @@ export default function GamePage() {
           session={session}
           gameId={gameId}
           team={selfPlayer?.team ?? 'none'}
+          isTraitorMode={game?.game_mode === 'traitor'}
           onCaptureDone={playCaptureDone}
           onGeneratorDone={playGeneratorAlert}
+        />
+      )}
+
+      {/* ── Traitor モード UI ───────────────────────────────────────────────── */}
+
+      {/* タスク進捗バー + 緊急集会ボタン */}
+      {isActive && game?.game_mode === 'traitor' && game && selfPlayer && (
+        <TaskProgress
+          game={game}
+          selfPlayer={selfPlayer}
+          visible={true}
+          meetingActive={meeting.isActive}
+          callingMeeting={callingMeeting}
+          onCallMeeting={async () => {
+            if (!session) return
+            setCallingMeeting(true)
+            try {
+              await callMeeting({ gameId, callerId: session.playerId, deviceId: session.deviceId })
+            } catch { /* ignore */ }
+            setCallingMeeting(false)
+          }}
+        />
+      )}
+
+      {/* Traitor / Sheriff 専用ボタン */}
+      {isActive && game?.game_mode === 'traitor' && selfPlayer && (
+        <SpecialRoleHUD
+          selfPlayer={selfPlayer}
+          sabotageUntil={game?.sabotage_until ?? null}
+          nearestCrewDist={nearestCrewDist}
+          nearestCrewId={nearestCrewId}
+          detectedQRPlayerId={
+            // レティクル内の QR から対象プレイヤーを特定（GPS なし時の Sheriff 調査代替）
+            detectedQR?.qrCodeId && selfPlayer.role2 === 'sheriff'
+              ? players.find(p => p.qr_code_id === detectedQR.qrCodeId && p.id !== selfPlayer.id && p.is_alive)?.id ?? null
+              : null
+          }
+          onSabotage={async () => {
+            if (!session) return
+            await useSabotage({ gameId, playerId: session.playerId, deviceId: session.deviceId })
+          }}
+          onInvestigate={async (targetId: string) => {
+            if (!session) return { role2: 'crew' as PlayerRole2 }
+            return investigatePlayer({
+              gameId,
+              sheriffId: session.playerId,
+              deviceId:  session.deviceId,
+              targetId,
+            })
+          }}
+        />
+      )}
+
+      {/* ロール開示画面（ゲーム開始直後） */}
+      {showRoleReveal && myRole2 && (
+        <RoleReveal
+          role2={myRole2}
+          traitorNames={traitorNames}
+          investigateUses={selfPlayer?.investigate_uses ?? 0}
+          onDone={() => {
+            setShowRoleReveal(false)
+            roleRevealDoneRef.current = true
+          }}
+        />
+      )}
+
+      {/* 集会オーバーレイ */}
+      {game?.game_mode === 'traitor' && (
+        <MeetingOverlay
+          visible={meeting.isActive || meetingResult !== null}
+          players={players}
+          selfPlayer={selfPlayer}
+          votes={meeting.votes}
+          myVote={meeting.myVote}
+          secondsLeft={meeting.secondsLeft}
+          isHost={isHost}
+          resolveResult={meetingResult}
+          onResultDone={() => setMeetingResult(null)}
+          onVote={async (targetId) => {
+            if (!session) return
+            const result = await submitVote({
+              gameId,
+              voterId:  session.playerId,
+              deviceId: session.deviceId,
+              targetId,
+            })
+            if (result.resolved) {
+              setMeetingResult({
+                exileId:   result.exileId   ?? null,
+                exileRole: result.exileRole ?? null,
+                gameOver:  result.gameOver  ?? false,
+                winner:    result.winner    ?? null,
+              })
+            }
+          }}
+          onResolve={async () => {
+            if (!session) return
+            const result = await resolveMeeting({
+              gameId,
+              hostId:  session.playerId,
+              deviceId: session.deviceId,
+            })
+            if (result.resolved) {
+              setMeetingResult({
+                exileId:   result.exileId   ?? null,
+                exileRole: result.exileRole ?? null,
+                gameOver:  result.gameOver  ?? false,
+                winner:    result.winner    ?? null,
+              })
+            }
+          }}
         />
       )}
 
@@ -563,6 +759,7 @@ export default function GamePage() {
           onOpen={openPanel}
           onClose={closePanel}
           onSendStamp={sendStamp}
+          isTraitorMode={game?.game_mode === 'traitor'}
         />
       )}
 
