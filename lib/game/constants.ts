@@ -1,5 +1,5 @@
-import type { QrCodeId, MarkerMode } from '@/types/database'
-export type { MarkerMode }
+import type { QrCodeId, MarkerMode, GameMode } from '@/types/database'
+export type { MarkerMode, GameMode }
 
 // ── マーカーモード ────────────────────────────────────────────────────────────
 export const MARKER_MODE_KEY     = 'weasel_marker_mode'
@@ -46,6 +46,38 @@ export const QR_LABELS: Record<QrCodeId, string> = {
   player_1: 'P1', player_2: 'P2', player_3: 'P3',
   player_4: 'P4', player_5: 'P5', player_6: 'P6',
 }
+
+// ── ゲームモード ──────────────────────────────────────────────────────────────
+export const GAME_MODE_LABELS: Record<GameMode, string> = {
+  battle:   '🌀 バトル（縮小マップ）',
+  survival: '🔦 サバイバル（Hunter vs Survivors）',
+  tactics:  '🏴 タクティクス（拠点争奪）',
+}
+
+// ── オブジェクト近接判定（m） ─────────────────────────────────────────────────
+export const CLAIM_RADIUS_M       = 15   // アイテム獲得可能距離
+export const GENERATOR_RADIUS_M   = 15   // 発電機起動可能距離
+export const CAPTURE_RADIUS_M     = 10   // 拠点占領可能距離
+
+// ── オブジェクト操作タイマー ─────────────────────────────────────────────────
+export const GENERATOR_HOLD_MS    = 10_000  // 発電機起動に必要なホールド時間
+export const CAPTURE_HOLD_MS      =  5_000  // 拠点占領に必要なホールド時間
+
+// ── ストーム（バトルモード） ──────────────────────────────────────────────────
+export const STORM_DAMAGE_HP      = 10   // 圏外 1 ティックのダメージ
+export const STORM_TICK_MS        = 5_000  // ダメージ間隔
+export const STORM_START_FRACTION = 0.20   // 全体時間の何割から縮小開始
+export const STORM_END_FRACTION   = 0.90   // 何割で最終サイズに到達
+
+// ── サバイバルモード ──────────────────────────────────────────────────────────
+export const TERROR_RADIUS_M      = 30   // Hunter が Survivor に警告を出す距離
+export const HUNTER_HP            = 200  // Hunter の初期 HP
+
+// ── タクティクスモード スコアリング ───────────────────────────────────────────
+/** 拠点を 10 秒保有するごとに 1pt 付与 */
+export const SCORE_SECS_PER_POINT = 10
+/** ホストクライアントがスコアをコミットする間隔 */
+export const SCORE_COMMIT_MS      = 30_000
 
 export const QR_COLORS: Record<QrCodeId, string> = {
   player_1: '#ef4444',

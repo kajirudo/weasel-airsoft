@@ -14,9 +14,12 @@ import { KillFeed, useKillFeed } from '@/components/game/KillFeed'
 import { ChatPanel }             from '@/components/game/ChatPanel'
 import { KillcamOverlay }        from '@/components/game/KillcamOverlay'
 import { RadarOverlay }          from '@/components/game/RadarOverlay'
+import { StormOverlay }          from '@/components/game/StormOverlay'
+import { ObjectiveAlert }        from '@/components/game/ObjectiveAlert'
+import { TacticsScore }          from '@/components/game/TacticsScore'
 import { Button }                from '@/components/ui/Button'
 import { ShareGameId }           from '@/components/lobby/ShareGameId'
-import { GameSettings }          from '@/components/lobby/GameSettings'
+import { GameSettings, type GameSettingsValues } from '@/components/lobby/GameSettings'
 import { usePlayerRealtime }     from '@/hooks/usePlayerRealtime'
 import { useGameRealtime }       from '@/hooks/useGameRealtime'
 import { useHitEffect }          from '@/hooks/useHitEffect'
@@ -28,13 +31,15 @@ import { useCountdown }          from '@/hooks/useCountdown'
 import { useGameChat }           from '@/hooks/useGameChat'
 import { useKillcam }            from '@/hooks/useKillcam'
 import { useRadar }              from '@/hooks/useRadar'
-import { registerHit, startGame, finishGameByTimeout, saveKillcamUrl } from '@/lib/game/actions'
+import { useObjectives }         from '@/hooks/useObjectives'
+import { useStorm }              from '@/hooks/useStorm'
+import { registerHit, startGame, finishGameByTimeout, saveKillcamUrl, commitTacticsScore } from '@/lib/game/actions'
 import { isHostPlayer } from '@/lib/game/utils'
 import { compositeKillcam }      from '@/lib/game/killcam-capture'
 import { createClient }          from '@/lib/supabase/client'
-import { MAX_HP, HIT_DAMAGE, STICKY_GRACE_MS, AUTO_FIRE_HOLD_MS } from '@/lib/game/constants'
+import { MAX_HP, HIT_DAMAGE, STICKY_GRACE_MS, AUTO_FIRE_HOLD_MS, SCORE_COMMIT_MS } from '@/lib/game/constants'
 import type { DetectedQR, LocalPlayerSession } from '@/types/game'
-import type { Player, QrCodeId, MarkerMode } from '@/types/database'
+import type { Player, QrCodeId, MarkerMode, GameMode } from '@/types/database'
 
 const DEFAULT_SHOOT_COOLDOWN = 800
 
@@ -45,12 +50,16 @@ export default function GamePage() {
   const [session, setSession]         = useState<LocalPlayerSession | null>(null)
   const [detectedQR, setDetectedQR]   = useState<DetectedQR | null>(null)
   const [isStarting, setIsStarting]   = useState(false)
-  const [balanceSettings, setBalance] = useState({
+  const [balanceSettings, setBalance] = useState<GameSettingsValues>({
     hitDamage:       HIT_DAMAGE,
     shootCooldown:   DEFAULT_SHOOT_COOLDOWN,
     durationMinutes: 0,
     teamMode:        false,
     markerMode:      'qr' as MarkerMode,
+    gameMode:        'battle' as GameMode,
+    stormRadiusM:    80,
+    stormFinalM:     15,
+    fieldRadiusM:    80,
   })
 
   // ゲームレコードから markerMode を初期化（game が読み込まれた時点で同期）
@@ -118,7 +127,36 @@ export default function GamePage() {
   })
 
   // ミニマップ用 GPS 追跡（ゲーム中のみ有効）
-  const { geoPos, gpsAvailable } = useRadar({ session, enabled: game?.status === 'active' })
+  const { geoPos, gpsAvailable } = useRadar({ session, enabled: game?.status === 'active' || game?.status === 'lobby' })
+
+  // ゲームオブジェクト（サバイバル・タクティクス・バトルモード）
+  const { objectives, nearbyObjectives } = useObjectives({
+    gameId:  gameId ?? null,
+    geoPos,
+    enabled: game?.status === 'active',
+  })
+
+  // ストーム（バトルモードのみ）
+  const storm = useStorm({
+    game,
+    geoPos,
+    session,
+    enabled: game?.status === 'active' && game?.game_mode === 'battle',
+  })
+
+  // タクティクス: ホストがスコアをコミット（30秒ごと）
+  const tacticsCommitRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  useEffect(() => {
+    if (game?.status !== 'active' || game?.game_mode !== 'tactics' || !isHostRef.current) return
+    tacticsCommitRef.current = setInterval(async () => {
+      if (!isHostRef.current) return
+      try { await commitTacticsScore({ gameId }) } catch { /* ignore */ }
+    }, SCORE_COMMIT_MS)
+    return () => {
+      if (tacticsCommitRef.current) clearInterval(tacticsCommitRef.current)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game?.status, game?.game_mode, gameId])
 
   // カウントダウン
   const { phase: cdPhase, count: cdCount, isBlock: cdBlock } = useCountdown(game?.status)
@@ -341,13 +379,20 @@ export default function GamePage() {
   const handleStartGame = async () => {
     setIsStarting(true)
     try {
+      // ホストの現在 GPS 位置をフィールド中心として使用
+      // ロビー中は useRadar(enabled=true) なので geoPos が取れている可能性が高い
       await startGame({
         gameId,
-        hitDamage:       balanceSettings.hitDamage,
-        shootCooldown:   balanceSettings.shootCooldown,
-        durationMinutes: balanceSettings.durationMinutes,
-        teamMode:        balanceSettings.teamMode,
-        markerMode:      balanceSettings.markerMode,
+        hitDamage:        balanceSettings.hitDamage,
+        shootCooldown:    balanceSettings.shootCooldown,
+        durationMinutes:  balanceSettings.durationMinutes,
+        teamMode:         balanceSettings.teamMode,
+        markerMode:       balanceSettings.markerMode,
+        gameMode:         balanceSettings.gameMode,
+        stormFinalM:      balanceSettings.stormFinalM,
+        fieldCenterLat:   geoPos?.lat ?? undefined,
+        fieldCenterLng:   geoPos?.lng ?? undefined,
+        fieldRadiusM:     balanceSettings.fieldRadiusM,
       })
     } catch { setIsStarting(false) }
   }
@@ -435,6 +480,34 @@ export default function GamePage() {
           players={players}
           geoPos={geoPos}
           gpsAvailable={gpsAvailable}
+          objectives={objectives}
+          storm={storm}
+          game={game}
+        />
+      )}
+
+      {/* ストームオーバーレイ（バトルモード） */}
+      <StormOverlay
+        storm={storm}
+        visible={isActive && game?.game_mode === 'battle'}
+      />
+
+      {/* タクティクス スコア表示 */}
+      {game && (
+        <TacticsScore
+          game={game}
+          objectives={objectives}
+          visible={isActive && game.game_mode === 'tactics'}
+        />
+      )}
+
+      {/* 近接オブジェクト操作ボタン（サバイバル・タクティクス・バトル） */}
+      {isActive && session && selfPlayer?.is_alive && (
+        <ObjectiveAlert
+          nearby={nearbyObjectives}
+          session={session}
+          gameId={gameId}
+          team={selfPlayer?.team ?? 'none'}
         />
       )}
 
