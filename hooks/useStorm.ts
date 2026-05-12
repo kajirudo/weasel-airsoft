@@ -122,7 +122,7 @@ export function useStorm({
         deviceId: session.deviceId,
         gameId:   game.id,
       })
-      if (result.newHp >= 0) onDamageRef.current?.()   // 青フラッシュ通知
+      if (result.newHp < (selfPlayer?.hp ?? 100)) onDamageRef.current?.()   // 青フラッシュ通知（実際にダメージが発生した場合のみ）
     } catch { /* ネットワークエラーは無視 */ }
   }, [session, game, selfPlayer])
 

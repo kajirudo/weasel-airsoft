@@ -381,13 +381,17 @@ export async function beginGenerator(params: {
   if (!player?.is_alive) throw new Error('戦闘不能です')
 
   const { data: obj } = await supabase.from('game_objectives')
-    .select('type, is_activated').eq('id', objectiveId).eq('game_id', gameId).single()
+    .select('type, is_activated, activating_by').eq('id', objectiveId).eq('game_id', gameId).single()
   if (!obj || obj.type !== 'generator') throw new Error('発電機ではありません')
   if (obj.is_activated) throw new Error('すでに起動済みです')
+  if (obj.activating_by && obj.activating_by !== playerId) throw new Error('他のプレイヤーが起動中です')
 
-  await supabase.from('game_objectives')
+  // activating_by IS NULL を条件にして競合防止（他プレイヤーが同時に beginGenerator した場合は片方が 0 rows）
+  const { data: claimed } = await supabase.from('game_objectives')
     .update({ activate_start: new Date().toISOString(), activating_by: playerId })
-    .eq('id', objectiveId)
+    .eq('id', objectiveId).is('activating_by', null)
+    .select('id')
+  if (!claimed || claimed.length === 0) throw new Error('他のプレイヤーが起動中です')
 }
 
 /** 発電機起動を完了する（サーバー側で 10 秒経過を検証） */

@@ -316,6 +316,17 @@ export default function GamePage() {
 
   const shootCooldown = game?.shoot_cooldown ?? DEFAULT_SHOOT_COOLDOWN
 
+  // ── Comms サボタージュ期限切れ時に再レンダリングを強制 ──────────────────────
+  // sabotage_until が過去になっても DB イベントが来なければレーダーが非表示のまま
+  const [, forceRadarUpdate] = useState(0)
+  useEffect(() => {
+    if (game?.sabotage_type !== 'comms' || !game.sabotage_until) return
+    const msLeft = new Date(game.sabotage_until).getTime() - Date.now()
+    if (msLeft <= 0) return
+    const id = window.setTimeout(() => forceRadarUpdate(n => n + 1), msLeft + 50)
+    return () => clearTimeout(id)
+  }, [game?.sabotage_type, game?.sabotage_until])
+
   // ── 射撃コア（ID指定） ────────────────────────────────────────────────────
   const shootTarget = useCallback(async (targetQrCodeId: QrCodeId) => {
     if (!session) return

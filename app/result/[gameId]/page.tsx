@@ -1,7 +1,7 @@
 import { createServerClient } from '@/lib/supabase/server'
 import Link from 'next/link'
-import type { QrCodeId, Team } from '@/types/database'
-import { QR_LABELS } from '@/lib/game/constants'
+import type { QrCodeId, Team, PlayerRole2 } from '@/types/database'
+import { QR_LABELS, ROLE2_LABELS, ROLE2_COLORS } from '@/lib/game/constants'
 import { RematchSection } from './RematchSection'
 
 interface ResultPageProps {
@@ -27,9 +27,11 @@ export default async function ResultPage({ params }: ResultPageProps) {
     .eq('game_id', gameId)
     .order('joined_at', { ascending: true })
 
-  const winner     = game?.winner as { name: string; qr_code_id: string } | null
-  const winnerTeam = game?.winner_team ?? null
-  const hostPlayer = players?.[0]
+  const winner      = game?.winner as { name: string; qr_code_id: string } | null
+  const winnerTeam  = game?.winner_team ?? null
+  const gameMode    = game?.game_mode ?? 'deathmatch'
+  const isTraitorMode = gameMode === 'traitor'
+  const hostPlayer  = players?.[0]
 
   // スコア表示は kills 降順 → hp 降順
   const sortedPlayers = [...(players ?? [])].sort(
@@ -58,8 +60,22 @@ export default async function ResultPage({ params }: ResultPageProps) {
           <p className="text-gray-500 text-xs uppercase tracking-widest">GAME OVER</p>
           {winnerTeam ? (
             <>
-              <p className={`font-black text-5xl ${winnerTeam === 'red' ? 'text-red-400' : 'text-blue-400'}`}>
-                {winnerTeam === 'red' ? '🔴 赤チーム' : '🔵 青チーム'}
+              <p className={`font-black text-5xl ${
+                winnerTeam === 'red'      ? 'text-red-400'    :
+                winnerTeam === 'blue'     ? 'text-blue-400'   :
+                winnerTeam === 'crew'     ? 'text-green-400'  :
+                winnerTeam === 'traitor'  ? 'text-red-400'    :
+                winnerTeam === 'hunter'   ? 'text-orange-400' :
+                winnerTeam === 'survivor' ? 'text-purple-400' :
+                'text-yellow-400'
+              }`}>
+                {winnerTeam === 'red'      ? '🔴 赤チーム'       :
+                 winnerTeam === 'blue'     ? '🔵 青チーム'       :
+                 winnerTeam === 'crew'     ? '👷 Crew'          :
+                 winnerTeam === 'traitor'  ? '🕵️ Traitor'      :
+                 winnerTeam === 'hunter'   ? '🔦 Hunter'        :
+                 winnerTeam === 'survivor' ? '✨ Survivor'      :
+                 winnerTeam}
               </p>
               <p className="text-white text-xl font-bold">の勝利！🏆</p>
             </>
@@ -79,19 +95,23 @@ export default async function ResultPage({ params }: ResultPageProps) {
         {/* スコアボード */}
         {sortedPlayers.length > 0 && (
           <div className="w-full bg-gray-900 rounded-2xl overflow-hidden">
-            <div className="grid grid-cols-[1.5rem_1fr_2.5rem_2.5rem_2.5rem] gap-2 px-4 py-2 bg-gray-800 text-gray-500 text-xs uppercase tracking-wide">
+            <div className={`grid ${isTraitorMode ? 'grid-cols-[1.5rem_1fr_3rem_2.5rem_2.5rem_2.5rem]' : 'grid-cols-[1.5rem_1fr_2.5rem_2.5rem_2.5rem]'} gap-2 px-4 py-2 bg-gray-800 text-gray-500 text-xs uppercase tracking-wide`}>
               <span>#</span>
               <span>名前</span>
+              {isTraitorMode && <span className="text-center">役職</span>}
               <span className="text-center">HP</span>
               <span className="text-center">Kill</span>
               <span className="text-center">QR</span>
             </div>
             {sortedPlayers.map((p, i) => {
-              const isWinner = winner && p.name === winner.name
+              const isWinner  = winner && p.name === winner.name
+              const role2     = p.role2 as PlayerRole2 | undefined
+              const roleColor = role2 ? ROLE2_COLORS[role2] : undefined
+              const roleLabel = role2 ? ROLE2_LABELS[role2] : null
               return (
                 <div
                   key={p.id}
-                  className={`grid grid-cols-[1.5rem_1fr_2.5rem_2.5rem_2.5rem] gap-2 px-4 py-3 items-center border-t border-gray-800
+                  className={`grid ${isTraitorMode ? 'grid-cols-[1.5rem_1fr_3rem_2.5rem_2.5rem_2.5rem]' : 'grid-cols-[1.5rem_1fr_2.5rem_2.5rem_2.5rem]'} gap-2 px-4 py-3 items-center border-t border-gray-800
                     ${isWinner ? 'bg-yellow-400/10' : ''}
                     ${!p.is_alive ? 'opacity-50' : ''}
                   `}
@@ -104,6 +124,18 @@ export default async function ResultPage({ params }: ResultPageProps) {
                     )}
                     <span className="text-white font-medium truncate">{p.name}</span>
                   </div>
+                  {isTraitorMode && (
+                    <span
+                      className="text-[9px] font-black px-1 py-0.5 rounded leading-none text-center"
+                      style={roleColor ? {
+                        backgroundColor: roleColor + '33',
+                        color:           roleColor,
+                        border:          `1px solid ${roleColor}88`,
+                      } : { color: '#6b7280' }}
+                    >
+                      {roleLabel ?? '—'}
+                    </span>
+                  )}
                   <span className={`text-sm font-mono text-center ${p.is_alive ? 'text-green-400' : 'text-red-400'}`}>
                     {p.hp}
                   </span>
