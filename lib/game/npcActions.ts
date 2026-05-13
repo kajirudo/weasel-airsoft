@@ -16,26 +16,7 @@ import {
   HUNTING_ATTACK_COOLDOWN_MS, HUNTING_CONTROLLER_TTL_MS, HUNTING_LUNGE_WARN_SEC,
   HUNTING_OFFLINE_THRESHOLD_MS, huntingNPCStats,
 } from '@/lib/game/constants'
-
-// ── GPS ユーティリティ ──────────────────────────────────────────────────────────
-function geoDistM(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
-  const dlat = (a.lat - b.lat) * 111_320
-  const dlng = (a.lng - b.lng) * 111_320 * Math.cos(a.lat * Math.PI / 180)
-  return Math.sqrt(dlat ** 2 + dlng ** 2)
-}
-
-/** a → b の方位角（北=0、時計回り、0〜360°） */
-function bearingDeg(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
-  const dLng = b.lng - a.lng
-  const dLat = b.lat - a.lat
-  const deg  = Math.atan2(dLng, dLat) * (180 / Math.PI)
-  return (deg + 360) % 360
-}
-
-/** -180〜+180 に正規化 */
-function normAngle(a: number): number {
-  return ((a % 360) + 540) % 360 - 180
-}
+import { geoDistM, bearingDeg, normAngle } from '@/lib/game/geo'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 初期化

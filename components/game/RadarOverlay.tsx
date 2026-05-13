@@ -46,7 +46,7 @@ interface RadarOverlayProps {
   objectives?:  ObjectiveWithDist[]
   storm?:       StormState
   game?:        Game | null
-  /** 青鬼モード: NPC 位置 */
+  /** ハンティングモード: NPC 位置 */
   npc?:         GameNpc | null
 }
 

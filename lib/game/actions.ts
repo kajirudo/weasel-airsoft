@@ -1,16 +1,9 @@
 'use server'
 
 import { createServerClient } from '@/lib/supabase/server'
-import { QR_CODE_IDS, SCORE_SECS_PER_POINT } from '@/lib/game/constants'
+import { QR_CODE_IDS, SCORE_SECS_PER_POINT, STORM_DAMAGE_HP } from '@/lib/game/constants'
+import { geoDistM } from '@/lib/game/geo'
 import type { QrCodeId, MarkerMode, GameMode } from '@/types/database'
-
-// ─── GPS ユーティリティ（サーバー側でオブジェクト散布に使用） ──────────────────
-
-function geoDistM(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
-  const dlat = (a.lat - b.lat) * 111_320
-  const dlng = (a.lng - b.lng) * 111_320 * Math.cos(a.lat * Math.PI / 180)
-  return Math.sqrt(dlat ** 2 + dlng ** 2)
-}
 
 function randomGeo(lat: number, lng: number, maxR: number) {
   const angle      = Math.random() * 2 * Math.PI
@@ -223,7 +216,8 @@ export async function startGame(params: {
     const genCount = await generateObjectivesInternal(supabase, {
       gameId, centerLat: fieldCenterLat, centerLng: fieldCenterLng,
       radiusM: fieldRadiusM, gameMode, playerCount, survivorCount,
-      sealCount: params.sealCount,
+      // ハンティングモードでは fieldRadiusM がスライダーで封印QR数として使われるため流用
+      sealCount: gameMode === 'hunting' ? fieldRadiusM : (params.sealCount ?? 5),
     })
     // Traitor モード: 生成した発電機の数を task_goal に設定
     if (gameMode === 'traitor' && genCount > 0) {
@@ -356,7 +350,7 @@ export async function updatePosition(params: {
   const supabase = createServerClient()
   await supabase
     .from('players')
-    .update({ lat, lng, heading })
+    .update({ lat, lng, heading, last_seen: new Date().toISOString() })
     .eq('id', playerId)
     .eq('device_id', deviceId)  // 自分の行のみ更新
 }
@@ -574,11 +568,18 @@ export async function completeCapture(params: {
 export async function cancelCapture(params: {
   objectiveId: string; playerId: string; gameId: string
 }): Promise<void> {
-  const { objectiveId, gameId } = params
+  const { objectiveId, playerId, gameId } = params
   const supabase = createServerClient()
+
+  // 自分のチームが占領中の場合のみキャンセル可（他チームのプロセスを横から止めない）
+  const { data: player } = await supabase.from('players')
+    .select('team').eq('id', playerId).eq('game_id', gameId).single()
+  if (!player) return
+
   await supabase.from('game_objectives')
     .update({ capture_start: null, capturing_team: null })
     .eq('id', objectiveId).eq('game_id', gameId)
+    .eq('capturing_team', player.team)
 }
 
 /** ストーム圏外ダメージ（クライアントの 5 秒ティックから呼ぶ） */
@@ -596,7 +597,7 @@ export async function stormDamage(params: {
     .select('id, hp, is_alive').eq('id', playerId).eq('device_id', deviceId).single()
   if (!player?.is_alive) return { newHp: 0, gameOver: false }
 
-  const newHp = Math.max(0, player.hp - 10)
+  const newHp = Math.max(0, player.hp - STORM_DAMAGE_HP)
   await supabase.from('players')
     .update({ hp: newHp, is_alive: newHp > 0, killer_name: newHp === 0 ? 'ストーム' : null })
     .eq('id', playerId)
@@ -604,56 +605,30 @@ export async function stormDamage(params: {
   let gameOver = false
   if (newHp === 0) {
     const { data: alive } = await supabase.from('players')
-      .select('id').eq('game_id', gameId).eq('is_alive', true)
+      .select('id, name').eq('game_id', gameId).eq('is_alive', true)
     if ((alive?.length ?? 0) <= 1) {
       gameOver = true
+      const lastSurvivor = alive?.[0] ?? null
       await supabase.from('games')
-        .update({ status: 'finished', finished_at: new Date().toISOString() })
+        .update({
+          status:      'finished',
+          finished_at: new Date().toISOString(),
+          // チームモードなら red/blue、個人戦なら winner_id で識別（winner_team は null）
+          winner_id:   lastSurvivor?.id ?? null,
+        })
         .eq('id', gameId)
     }
   }
   return { newHp, gameOver }
 }
 
-/** タクティクスモード: 現在の保有時間をスコアに確定する（ホストが定期呼び出し） */
+/** タクティクスモード: 現在の保有時間をスコアに確定する（ホストが定期呼び出し）
+ *  Postgres RPC でアトミックに実行するため二重カウントが発生しない。
+ */
 export async function commitTacticsScore(params: { gameId: string }): Promise<void> {
   const { gameId } = params
   const supabase  = createServerClient()
-  const now       = Date.now()
-
-  const { data: points } = await supabase.from('game_objectives')
-    .select('id, controlled_by, control_since')
-    .eq('game_id', gameId).eq('type', 'control_point').neq('controlled_by', 'none')
-  if (!points?.length) return
-
-  let addRed = 0, addBlue = 0
-  const updatedIds: string[] = []
-
-  for (const p of points) {
-    if (!p.control_since) continue
-    const secs = (now - new Date(p.control_since).getTime()) / 1000
-    const pts  = Math.floor(secs / SCORE_SECS_PER_POINT)
-    if (pts <= 0) continue
-    if (p.controlled_by === 'red')  addRed  += pts
-    if (p.controlled_by === 'blue') addBlue += pts
-    updatedIds.push(p.id)
-  }
-
-  // control_since をリセット（次の tick で二重カウントしないため）
-  if (updatedIds.length > 0) {
-    await supabase.from('game_objectives')
-      .update({ control_since: new Date(now).toISOString() })
-      .in('id', updatedIds)
-  }
-
-  if (addRed > 0 || addBlue > 0) {
-    const { data: game } = await supabase.from('games')
-      .select('score_red, score_blue').eq('id', gameId).single()
-    await supabase.from('games').update({
-      score_red:  (game?.score_red  ?? 0) + addRed,
-      score_blue: (game?.score_blue ?? 0) + addBlue,
-    }).eq('id', gameId)
-  }
+  await supabase.rpc('commit_tactics_score', { p_game_id: gameId })
 }
 
 export async function finishGameByTimeout(params: { gameId: string }): Promise<void> {

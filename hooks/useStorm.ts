@@ -11,6 +11,7 @@ import {
   STORM_END_FRACTION,
   STORM_TICK_MS,
 } from '@/lib/game/constants'
+import { geoDistM } from '@/lib/game/geo'
 import type { Game, Player } from '@/types/database'
 import type { GeoPosition } from '@/hooks/useRadar'
 import type { LocalPlayerSession } from '@/types/game'
@@ -29,15 +30,6 @@ interface UseStormParams {
   enabled:    boolean
   /** ストームダメージを受けたとき呼ばれる（青フラッシュ用） */
   onDamage?:  () => void
-}
-
-function geoDistM(
-  a: { lat: number; lng: number },
-  b: { lat: number; lng: number },
-): number {
-  const dlat = (a.lat - b.lat) * 111_320
-  const dlng = (a.lng - b.lng) * 111_320 * Math.cos(a.lat * Math.PI / 180)
-  return Math.sqrt(dlat ** 2 + dlng ** 2)
 }
 
 function computeSafeRadius(

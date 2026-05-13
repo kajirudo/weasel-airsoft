@@ -554,6 +554,11 @@ export default function GamePage() {
   }, [autoFireEnabled])
 
   const handleStartGame = async () => {
+    // ハンティングモードは GPS 必須（フィールド中心が決まらない）
+    if (balanceSettings.gameMode === 'hunting' && !geoPos) {
+      alert('ハンティングモードは GPS が必要です。\nGPS が取得できてからゲームを開始してください。')
+      return
+    }
     setIsStarting(true)
     try {
       // ホストの現在 GPS 位置をフィールド中心として使用
