@@ -1012,14 +1012,16 @@ export default function GamePage() {
               </a>
             </div>
           )}
-          {isHost && (players.length >= 2 || balanceSettings.soloMode) && (
+          {isHost && (players.length >= 2 || balanceSettings.soloMode || balanceSettings.gameMode === 'hunting') && (
             <Button onClick={handleStartGame} loading={isStarting}>
               {balanceSettings.soloMode
                 ? `ソロ開始 (CPU${balanceSettings.botCount}体)`
+                : balanceSettings.gameMode === 'hunting'
+                ? `ハンティング開始 (${players.length}人 vs NPC)`
                 : `ゲーム開始 (${players.length}人)`}
             </Button>
           )}
-          {isHost && players.length < 2 && !balanceSettings.soloMode && (
+          {isHost && players.length < 2 && !balanceSettings.soloMode && balanceSettings.gameMode !== 'hunting' && (
             <p className="text-gray-300 text-sm bg-black/60 px-3 py-1 rounded-lg">
               あと{2 - players.length}人参加で開始 / またはソロモードをオン
             </p>

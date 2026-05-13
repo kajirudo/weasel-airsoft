@@ -232,6 +232,16 @@ export function GameSettings({
         </div>
       )}
 
+      {/* ── ハンティングモード: 1人でも開始可能の案内 ──────────────────────── */}
+      {gameMode === 'hunting' && (
+        <div className="rounded-lg border border-purple-900/50 bg-purple-900/10 p-3">
+          <p className="text-purple-400 text-xs font-semibold">👤 1人でも開始できます</p>
+          <p className="text-gray-600 text-xs mt-1">
+            ハンティングモードは NPC が対戦相手です。ソロプレイは不要です。
+          </p>
+        </div>
+      )}
+
       {/* ── ソロプレイ ───────────────────────────────────────────────────────── */}
       {gameMode !== 'hunting' && (
         <div className="space-y-3 border border-cyan-900/50 rounded-lg p-3 bg-cyan-900/10">
