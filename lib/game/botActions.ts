@@ -14,7 +14,7 @@
 import { createServerClient } from '@/lib/supabase/server'
 import { geoDistM }           from '@/lib/game/geo'
 import {
-  BOT_NAMES, BOT_SHOOT_RANGE_M, BOT_SHOOT_COOLDOWN_MS, BOT_SPEED_MPS,
+  BOT_NAMES, BOT_SHOOT_RANGE_M, BOT_SHOOT_COOLDOWN_MS,
   type BotDifficulty,
 } from '@/lib/game/constants'
 import type { QrCodeId, BotBehavior, GameMode, Team } from '@/types/database'
@@ -189,8 +189,9 @@ export async function botAttack(params: {
   deviceId:     string
   botId:        string
   targetId:     string   // 攻撃対象の人間プレイヤー ID
+  difficulty?:  BotDifficulty
 }): Promise<{ hit: boolean }> {
-  const { gameId, controllerId, deviceId, botId, targetId } = params
+  const { gameId, controllerId, deviceId, botId, targetId, difficulty = 'normal' } = params
   const supabase = createServerClient()
 
   // ホスト認証
@@ -217,9 +218,8 @@ export async function botAttack(params: {
   }
 
   // クールダウンチェック（last_shot_at を流用）
-  // difficulty はボットの speed から逆引き（簡易）。固定値 4000ms でも可
   const lastShot = bot.last_shot_at ? new Date(bot.last_shot_at).getTime() : 0
-  if (Date.now() - lastShot < BOT_SHOOT_COOLDOWN_MS.normal) return { hit: false }
+  if (Date.now() - lastShot < BOT_SHOOT_COOLDOWN_MS[difficulty]) return { hit: false }
 
   const hitDamage = game?.hit_damage ?? 25
   const newHp     = Math.max(0, target.hp - hitDamage)
@@ -429,36 +429,34 @@ async function checkAndMaybeFinish(
     .select('status, game_mode').eq('id', gameId).single()
   if (game?.status !== 'active') return false
 
-  // タクティクス・traitor はこのロジックで終了しない（別の条件）
+  // タクティクスはこのロジックで終了しない（別の条件で終了）
   if (game.game_mode === 'tactics') return false
 
   const { data: alive } = await supabase.from('players')
-    .select('id, name, is_bot').eq('game_id', gameId).eq('is_alive', true)
+    .select('id, name, is_bot, role2, bot_behavior')
+    .eq('game_id', gameId).eq('is_alive', true)
   if (!alive) return false
 
   const aliveHumans = alive.filter(p => !p.is_bot)
   const aliveBots   = alive.filter(p => p.is_bot)
-
-  // 全員死亡 or 1 人のみ残った場合に終了
-  if (alive.length > 1) return false
-
   const now = new Date().toISOString()
-  const lastOne = alive[0] ?? null
 
+  // ── Traitor モード終了判定（生存数に関わらず毎回チェック） ─────────────────
   if (game.game_mode === 'traitor') {
-    // traitor モード: スパイが全員死んだら crew 勝利
-    const { data: spyBots } = await supabase.from('players')
-      .select('id').eq('game_id', gameId).eq('is_alive', true).eq('bot_behavior', 'spy_bot')
-    const { data: humanTraitors } = await supabase.from('players')
-      .select('id').eq('game_id', gameId).eq('is_alive', true).eq('role2', 'traitor').eq('is_bot', false)
-    if ((spyBots?.length ?? 0) === 0 && (humanTraitors?.length ?? 0) === 0) {
+    // Crew 勝利: 生存スパイ（spy_bot + 人間 Traitor）が 0
+    const aliveSpyBots      = aliveBots.filter(b => b.bot_behavior === 'spy_bot')
+    const aliveHumanTraitors = aliveHumans.filter(h => h.role2 === 'traitor')
+    if (aliveSpyBots.length === 0 && aliveHumanTraitors.length === 0) {
       await supabase.from('games').update({
         status: 'finished', finished_at: now, winner_team: 'crew',
       }).eq('id', gameId)
       return true
     }
-    // クルー全滅チェック
-    if (aliveHumans.length === 0 && aliveBots.filter(b => b.is_bot).length === 0) {
+
+    // Traitor 勝利: 生存クルー（人間クルー + crew_bot）が 0
+    const aliveCrewHumans = aliveHumans.filter(h => h.role2 !== 'traitor')
+    const aliveCrewBots   = aliveBots.filter(b => b.bot_behavior === 'crew_bot')
+    if (aliveCrewHumans.length === 0 && aliveCrewBots.length === 0) {
       await supabase.from('games').update({
         status: 'finished', finished_at: now, winner_team: 'traitor',
       }).eq('id', gameId)
@@ -467,7 +465,10 @@ async function checkAndMaybeFinish(
     return false
   }
 
-  // deathmatch / battle / survival: 最後の 1 人が勝者
+  // ── deathmatch / battle / survival: 全員死亡 or 1 人のみ残った場合に終了 ──
+  if (alive.length > 1) return false
+
+  const lastOne = alive[0] ?? null
   await supabase.from('games').update({
     status:      'finished',
     finished_at: now,
@@ -477,12 +478,3 @@ async function checkAndMaybeFinish(
   return true
 }
 
-// ── 難易度設定取得（ヘルパー） ────────────────────────────────────────────────
-
-export function getBotSpeedMps(difficulty: BotDifficulty): number {
-  return BOT_SPEED_MPS[difficulty]
-}
-
-export function getBotCooldownMs(difficulty: BotDifficulty): number {
-  return BOT_SHOOT_COOLDOWN_MS[difficulty]
-}

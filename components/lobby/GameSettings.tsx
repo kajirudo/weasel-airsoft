@@ -119,7 +119,7 @@ export function GameSettings({
           {gameMode === 'survival' && '1人の Hunter vs 複数 Survivors。発電機を全起動で Survivor 勝利。'}
           {gameMode === 'tactics'  && '3拠点をチームで奪い合う。時間終了時に拠点得点が多い方が勝利。'}
           {gameMode === 'traitor'  && '中に潜むスパイを投票で追放せよ。タスク完了か全員追放で Crew 勝利。'}
-          {gameMode === 'hunting'  && 'プレイヤー全員 vs NPC（鬼）。背後攻撃でHPをゼロにするか、封印QRを全スキャンで勝利。捕まったら脱落。'}
+          {gameMode === 'hunting'  && 'プレイヤー全員 vs NPC（鬼）。背後攻撃でHPをゼロにするか、封印ポイントに近づいてホールドで全解除すると勝利。捕まったら脱落。'}
         </p>
       </div>
 
@@ -155,7 +155,7 @@ export function GameSettings({
             onChange={(v) => set({ fieldRadiusM: v })}
           />
           <p className="text-gray-600 text-xs">
-            封印QR を全て "スキャン" するとプレイヤー勝利。封印QRは半径 {fieldRadiusM * 20}m 内に散布されます。
+            封印ポイントに近づいてホールドで解除。全解除でプレイヤー勝利。ポイントは半径 {fieldRadiusM * 20}m 内に散布されます。
           </p>
         </div>
       )}

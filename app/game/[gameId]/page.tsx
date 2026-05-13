@@ -590,6 +590,11 @@ export default function GamePage() {
       alert('ハンティングモードは GPS が必要です。\nGPS が取得できてからゲームを開始してください。')
       return
     }
+    // ソロモードも GPS 必須（ボットの初期位置・近接判定に使用）
+    if (balanceSettings.soloMode && !geoPos) {
+      alert('ソロプレイは GPS が必要です。\nGPS が取得できてからゲームを開始してください。')
+      return
+    }
     setIsStarting(true)
     try {
       // ホストの現在 GPS 位置をフィールド中心として使用
@@ -820,7 +825,6 @@ export default function GamePage() {
                         })
                         if (result.hit) {
                           result.gameOver ? playKill() : playShot()
-                          triggerFlash()
                         }
                       } catch { /* ignore */ }
                       setIsBotShooting(false)

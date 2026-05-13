@@ -11,13 +11,12 @@
 
 import { useEffect, useRef, useCallback } from 'react'
 import type { Player, GameObjective, GameMode } from '@/types/database'
-import type { GeoPosition }                     from '@/hooks/useRadar'
 import type { LocalPlayerSession }              from '@/types/game'
 import {
   BOT_MOVE_INTERVAL_MS, BOT_TASK_COMPLETE_MS,
   type BotDifficulty,
 } from '@/lib/game/constants'
-import { getBotMoveTarget, getBotAttackTarget, stepToward, randomFieldPoint } from '@/lib/game/botAI'
+import { getBotMoveTarget, getBotAttackTarget, stepToward } from '@/lib/game/botAI'
 import { BOT_ACCURACY, BOT_SPEED_MPS, BOT_SHOOT_COOLDOWN_MS } from '@/lib/game/constants'
 import {
   updateBotPositions, botAttack, botVoteAll, botCompleteTask,
@@ -156,8 +155,9 @@ export function useBotController({
 
       botAttack({
         gameId, controllerId, deviceId,
-        botId:    bot.id,
-        targetId: attackTarget.id,
+        botId:      bot.id,
+        targetId:   attackTarget.id,
+        difficulty: diff,
       }).catch(() => {})
     }
   }, [gameId, gameMode, fieldRadiusM])
