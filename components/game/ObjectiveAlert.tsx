@@ -20,6 +20,7 @@ import {
   completeCapture,
   cancelCapture,
 } from '@/lib/game/actions'
+import { checkSealVictory } from '@/lib/game/npcActions'
 import { GENERATOR_HOLD_MS, CAPTURE_HOLD_MS } from '@/lib/game/constants'
 import type { NearbyObjectives, ObjectiveWithDist } from '@/hooks/useObjectives'
 import type { LocalPlayerSession } from '@/types/game'
@@ -31,6 +32,8 @@ interface Props {
   team:      'red' | 'blue' | 'none'
   /** traitor モードかどうか（発電機完了時に completeMission を呼ぶ） */
   isTraitorMode?: boolean
+  /** hunting モードかどうか（封印QR スキャン完了時に checkSealVictory を呼ぶ） */
+  isHuntingMode?: boolean
   /** 占領完了時に呼ばれるコールバック（サウンド再生用） */
   onCaptureDone?: () => void
   /** 発電機起動完了時に呼ばれるコールバック */
@@ -137,7 +140,7 @@ function HoldButton({
 // ── メインコンポーネント ────────────────────────────────────────────────────────
 export function ObjectiveAlert({
   nearby, session, gameId, team,
-  isTraitorMode, onCaptureDone, onGeneratorDone,
+  isTraitorMode, isHuntingMode, onCaptureDone, onGeneratorDone,
 }: Props) {
   const [busy,    setBusy]    = useState(false)
   const [message, setMessage] = useState<string | null>(null)
@@ -256,12 +259,50 @@ export function ObjectiveAlert({
     } catch { /* 無視 */ }
   }, [session, gameId])
 
-  const hasAny = nearby.items.length > 0 || nearby.generators.length > 0 || nearby.controlPoints.length > 0
+  // ── 封印QR スキャン（hunting モード）────────────────────────────────────
+  const sealRef = useRef<ObjectiveWithDist | null>(null)
+
+  const handleSealStart = useCallback(async (obj: ObjectiveWithDist) => {
+    if (!session) return
+    sealRef.current = obj
+  }, [session])
+
+  const handleSealComplete = useCallback(async () => {
+    const obj = sealRef.current
+    if (!session || !obj) return
+    try {
+      // claim と同じ仕組みで封印済みにする
+      await claimObjective({
+        objectiveId: obj.id, playerId: session.playerId,
+        deviceId: session.deviceId, gameId,
+      })
+      // 全封印完了チェック → 勝利判定
+      const { allSealed } = await checkSealVictory({ gameId })
+      setMessage(allSealed
+        ? '🔏 全封印完了！プレイヤーの勝利！'
+        : `🔏 封印 ${obj.seal_index ?? '?'} スキャン完了！`)
+      onGeneratorDone?.()
+    } catch (e: unknown) {
+      setMessage(`❌ ${e instanceof Error ? e.message : 'エラー'}`)
+    }
+  }, [session, gameId, onGeneratorDone])
+
+  const handleSealCancel = useCallback(() => {
+    sealRef.current = null
+  }, [])
+
+  const hasAny = (
+    nearby.items.length > 0 ||
+    nearby.generators.length > 0 ||
+    nearby.controlPoints.length > 0 ||
+    nearby.seals.length > 0
+  )
   if (!hasAny && !message) return null
 
   const firstItem = nearby.items[0]
   const firstGen  = nearby.generators[0]
   const firstCp   = nearby.controlPoints[0]
+  const firstSeal = nearby.seals[0]
 
   const teamColor = team === 'red' ? '#ef4444' : team === 'blue' ? '#3b82f6' : '#6b7280'
 
@@ -349,6 +390,18 @@ export function ObjectiveAlert({
             onHoldStart={() => handleCpStart(firstCp)}
             onHoldComplete={handleCpComplete}
             onHoldCancel={handleCpCancel}
+          />
+        )}
+
+        {/* 封印QR スキャン（hunting モード） */}
+        {isHuntingMode && firstSeal && (
+          <HoldButton
+            label={`🔏 封印 ${firstSeal.seal_index ?? '?'} スキャン (${firstSeal.distM != null ? Math.round(firstSeal.distM) + 'm' : '--'})`}
+            holdMs={GENERATOR_HOLD_MS}
+            color="#8b5cf6"
+            onHoldStart={() => handleSealStart(firstSeal)}
+            onHoldComplete={handleSealComplete}
+            onHoldCancel={handleSealCancel}
           />
         )}
       </div>

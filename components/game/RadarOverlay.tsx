@@ -18,11 +18,11 @@
  */
 
 import { useEffect, useRef, memo } from 'react'
-import type { Player, Game }        from '@/types/database'
-import type { GeoPosition }          from '@/hooks/useRadar'
-import type { ObjectiveWithDist }    from '@/hooks/useObjectives'
-import type { StormState }           from '@/hooks/useStorm'
-import { QR_COLORS }                 from '@/lib/game/constants'
+import type { Player, Game, GameNpc } from '@/types/database'
+import type { GeoPosition }            from '@/hooks/useRadar'
+import type { ObjectiveWithDist }      from '@/hooks/useObjectives'
+import type { StormState }             from '@/hooks/useStorm'
+import { QR_COLORS }                   from '@/lib/game/constants'
 
 // ── 定数 ──────────────────────────────────────────────────────────────────────
 const R             = 72   // レーダー円の半径（px）
@@ -46,6 +46,8 @@ interface RadarOverlayProps {
   objectives?:  ObjectiveWithDist[]
   storm?:       StormState
   game?:        Game | null
+  /** 青鬼モード: NPC 位置 */
+  npc?:         GameNpc | null
 }
 
 export const RadarOverlay = memo(function RadarOverlay({
@@ -56,6 +58,7 @@ export const RadarOverlay = memo(function RadarOverlay({
   objectives = [],
   storm,
   game,
+  npc,
 }: RadarOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -198,6 +201,52 @@ export const RadarOverlay = memo(function RadarOverlay({
         ctx.stroke()
       }
 
+      // ── NPC（青鬼）マーカー ───────────────────────────────────────────────
+      if (npc?.lat != null && npc?.lng != null) {
+        const dx_m = (npc.lng - geoPos.lng) * mPerDegLng
+        const dy_m = (npc.lat - geoPos.lat) * mPerDegLat
+        const dist = Math.sqrt(dx_m ** 2 + dy_m ** 2)
+        const px   = cx + (Math.min(dx_m, RADAR_RANGE_M * Math.sign(dx_m)) / RADAR_RANGE_M) * R
+        const py   = cy - (Math.min(dy_m, RADAR_RANGE_M * Math.sign(dy_m)) / RADAR_RANGE_M) * R
+
+        // 範囲外でも端に表示（clamp して矢印的に使う）
+        const now   = Date.now()
+        const isStunned   = !!(npc.stun_until    && new Date(npc.stun_until).getTime()    > now)
+        const isConfused  = !!(npc.confused_until && new Date(npc.confused_until).getTime() > now)
+        const isLunging   = !!(npc.lunge_fire_at  && new Date(npc.lunge_fire_at).getTime()  > now)
+
+        ctx.save()
+        ctx.font = `${dist > RADAR_RANGE_M ? 12 : 16}px serif`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        // スタン中は点滅（tick で交互）
+        if (!isStunned || Math.floor(Date.now() / 400) % 2 === 0) {
+          ctx.fillText('👹', px, py)
+        }
+
+        // ランジ予告 → 赤い円
+        if (isLunging && dist <= RADAR_RANGE_M) {
+          const rPx = (npc.lunge_radius_m / RADAR_RANGE_M) * R
+          ctx.beginPath()
+          ctx.arc(px, py, rPx, 0, Math.PI * 2)
+          ctx.strokeStyle = 'rgba(239,68,68,0.8)'
+          ctx.lineWidth   = 2
+          ctx.setLineDash([3, 2])
+          ctx.stroke()
+          ctx.setLineDash([])
+        }
+
+        // ステータスラベル
+        const label = isStunned ? 'STUN' : isConfused ? '？' : null
+        if (label) {
+          ctx.font = 'bold 8px monospace'
+          ctx.fillStyle = isStunned ? '#fbbf24' : '#93c5fd'
+          ctx.fillText(label, px, py + 10)
+        }
+
+        ctx.restore()
+      }
+
       ctx.restore()  // clip 解除
     }
 
@@ -233,7 +282,7 @@ export const RadarOverlay = memo(function RadarOverlay({
     ctx.fillText(`${RADAR_RANGE_M}m`, cx + R - 2, cy + R - 2)
     ctx.restore()
 
-  }, [selfPlayerId, players, geoPos, gpsAvailable, objectives, storm, game])
+  }, [selfPlayerId, players, geoPos, gpsAvailable, objectives, storm, game, npc])
 
   return (
     <canvas

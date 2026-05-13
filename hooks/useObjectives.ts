@@ -28,6 +28,7 @@ export interface NearbyObjectives {
   items:         ObjectiveWithDist[]   // medkit / damage_boost（未獲得）
   generators:    ObjectiveWithDist[]   // 未起動の発電機
   controlPoints: ObjectiveWithDist[]   // 拠点（CAPTURE_RADIUS_M 内）
+  seals:         ObjectiveWithDist[]   // 封印QR（hunting モード・未スキャン）
 }
 
 interface UseObjectivesParams {
@@ -150,6 +151,11 @@ export function useObjectives({
     controlPoints: objectivesWithDist.filter(o =>
       o.type === 'control_point' &&
       (o.distM === null || o.distM <= CAPTURE_RADIUS_M)
+    ),
+    seals: objectivesWithDist.filter(o =>
+      o.type === 'seal' &&
+      !o.is_claimed &&
+      (o.distM === null || o.distM <= GENERATOR_RADIUS_M)
     ),
   }
 

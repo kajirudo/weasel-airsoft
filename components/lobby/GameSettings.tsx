@@ -1,7 +1,14 @@
 'use client'
 
 import type { MarkerMode, GameMode } from '@/lib/game/constants'
-import { GAME_MODE_LABELS } from '@/lib/game/constants'
+import {
+  GAME_MODE_LABELS,
+  HUNTING_SOLO_HP, HUNTING_SOLO_SPEED, HUNTING_SOLO_LOCKON,
+  HUNTING_DUO_HP,  HUNTING_DUO_SPEED,  HUNTING_DUO_LOCKON,
+  HUNTING_NPC_HP_BASE, HUNTING_NPC_SPEED_BASE, HUNTING_LOCKON_SEC_BASE,
+  HUNTING_BACKSTAB_RANGE_M, HUNTING_BACKSTAB_ANGLE,
+  HUNTING_ATTACK_COOLDOWN_MS,
+} from '@/lib/game/constants'
 
 export interface GameSettingsValues {
   hitDamage:       number
@@ -99,16 +106,54 @@ export function GameSettings({
           {gameMode === 'battle'   && 'GPS 安全圏が時間経過とともに縮小。圏外でダメージ。'}
           {gameMode === 'survival' && '1人の Hunter vs 複数 Survivors。発電機を全起動で Survivor 勝利。'}
           {gameMode === 'tactics'  && '3拠点をチームで奪い合う。時間終了時に拠点得点が多い方が勝利。'}
-          {gameMode === 'traitor'  && '中に潜む Traitor を投票で追放せよ。タスク完了か全員追放で Crew 勝利。'}
+          {gameMode === 'traitor'  && '中に潜むスパイを投票で追放せよ。タスク完了か全員追放で Crew 勝利。'}
+          {gameMode === 'hunting'  && 'プレイヤー全員 vs NPC（鬼）。背後攻撃でHPをゼロにするか、封印QRを全スキャンで勝利。捕まったら脱落。'}
         </p>
       </div>
 
-      {/* ── Traitor モード専用設定 ─────────────────────────────────────── */}
+      {/* ── ハンティングモード専用設定 ────────────────────────────────────── */}
+      {gameMode === 'hunting' && (
+        <div className="space-y-2 border border-purple-900/50 rounded-lg p-3 bg-purple-900/10">
+          <p className="text-purple-400 text-xs font-semibold">👹 ハンティング 設定</p>
+          <p className="text-gray-500 text-xs leading-snug">
+            NPCのHP・速度・ロックオン時間はプレイヤー人数に応じて自動調整されます。
+          </p>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            {([
+              { label: '1人',  hp: HUNTING_SOLO_HP,     speed: HUNTING_SOLO_SPEED,     lock: HUNTING_SOLO_LOCKON },
+              { label: '2人',  hp: HUNTING_DUO_HP,      speed: HUNTING_DUO_SPEED,      lock: HUNTING_DUO_LOCKON },
+              { label: '3人+', hp: HUNTING_NPC_HP_BASE, speed: HUNTING_NPC_SPEED_BASE, lock: HUNTING_LOCKON_SEC_BASE },
+            ] as const).map(s => (
+              <div key={s.label} className="bg-gray-800/60 rounded-lg p-2 space-y-0.5">
+                <p className="text-purple-300 font-bold text-[10px]">{s.label}</p>
+                <p className="text-gray-400 text-[10px]">HP {s.hp}</p>
+                <p className="text-gray-400 text-[10px]">{s.speed}m/s</p>
+                <p className="text-gray-400 text-[10px]">捕食 {s.lock}s</p>
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-1.5 text-[10px] text-gray-500 bg-gray-900/50 rounded-lg p-2">
+            <p>🎯 背後攻撃射程: <span className="text-purple-300">{HUNTING_BACKSTAB_RANGE_M}m</span></p>
+            <p>📐 背後判定角: <span className="text-purple-300">±{HUNTING_BACKSTAB_ANGLE}°</span></p>
+            <p>🔄 攻撃CD: <span className="text-purple-300">{HUNTING_ATTACK_COOLDOWN_MS / 1000}s</span></p>
+          </div>
+          <SliderField
+            label="封印QR数" value={fieldRadiusM} min={2} max={8} step={1}
+            displayValue={`${fieldRadiusM}個`}
+            onChange={(v) => set({ fieldRadiusM: v })}
+          />
+          <p className="text-gray-600 text-xs">
+            封印QR を全て "スキャン" するとプレイヤー勝利。封印QRは半径 {fieldRadiusM * 20}m 内に散布されます。
+          </p>
+        </div>
+      )}
+
+      {/* ── スパイモード専用設定 ──────────────────────────────────────────── */}
       {gameMode === 'traitor' && (
         <div className="space-y-3 border border-red-900/50 rounded-lg p-3 bg-red-900/10">
-          <p className="text-red-400 text-xs font-semibold">🕵️ Traitor 設定</p>
+          <p className="text-red-400 text-xs font-semibold">🕵️ スパイ 設定</p>
           <SliderField
-            label="Traitor 人数" value={traitorCount} min={1} max={2} step={1}
+            label="スパイ 人数" value={traitorCount} min={1} max={2} step={1}
             displayValue={`${traitorCount}人`}
             onChange={(v) => set({ traitorCount: v })}
           />
@@ -230,7 +275,7 @@ export function GameSettings({
             <p className="text-yellow-700 text-xs mt-0.5">タクティクスは必須</p>
           )}
           {gameMode === 'traitor' && (
-            <p className="text-red-700 text-xs mt-0.5">Traitor モードは無効</p>
+            <p className="text-red-700 text-xs mt-0.5">スパイモードは無効</p>
           )}
         </div>
         <div
@@ -250,7 +295,7 @@ export function GameSettings({
         {durationMinutes > 0 && gameMode === 'battle'   && <p>時間切れ → ストームダメージで最後の生存者が勝利</p>}
         {durationMinutes > 0 && gameMode === 'survival' && <p>時間切れ → Survivor 勝利</p>}
         {durationMinutes > 0 && gameMode === 'tactics'  && <p>時間切れ → 獲得ポイントが多いチームが勝利</p>}
-        {durationMinutes > 0 && gameMode === 'traitor'  && <p>時間切れ → タスク未完なら Traitor 勝利</p>}
+        {durationMinutes > 0 && gameMode === 'traitor'  && <p>時間切れ → タスク未完ならスパイ勝利</p>}
         {durationMinutes > 0 && gameMode === 'battle' && !teamMode && <p>最後の生存者が勝利</p>}
       </div>
     </div>

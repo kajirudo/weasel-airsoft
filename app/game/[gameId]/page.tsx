@@ -21,6 +21,10 @@ import { RoleReveal }            from '@/components/game/RoleReveal'
 import { TaskProgress }          from '@/components/game/TaskProgress'
 import { SpecialRoleHUD }        from '@/components/game/SpecialRoleHUD'
 import { MeetingOverlay }        from '@/components/game/MeetingOverlay'
+import { NPCStatus }             from '@/components/game/NPCStatus'
+import { NPCAlert }              from '@/components/game/NPCAlert'
+import { NPCLungeWarning }       from '@/components/game/NPCLungeWarning'
+import { NPCAttackButton }       from '@/components/game/NPCAttackButton'
 import { Button }                from '@/components/ui/Button'
 import { ShareGameId }           from '@/components/lobby/ShareGameId'
 import { GameSettings, type GameSettingsValues } from '@/components/lobby/GameSettings'
@@ -38,14 +42,18 @@ import { useRadar }              from '@/hooks/useRadar'
 import { useObjectives }         from '@/hooks/useObjectives'
 import { useStorm }              from '@/hooks/useStorm'
 import { useMeeting }            from '@/hooks/useMeeting'
+import { useNPC }                from '@/hooks/useNPC'
+import { useNPCController }      from '@/hooks/useNPCController'
+import { useNPCVibration }       from '@/hooks/useNPCVibration'
 import {
   registerHit, startGame, finishGameByTimeout, saveKillcamUrl, commitTacticsScore,
   getMyRole, callMeeting, submitVote, resolveMeeting, useSabotage, investigatePlayer,
 } from '@/lib/game/actions'
+import { attackNPC, claimController } from '@/lib/game/npcActions'
 import { isHostPlayer } from '@/lib/game/utils'
 import { compositeKillcam }      from '@/lib/game/killcam-capture'
 import { createClient }          from '@/lib/supabase/client'
-import { MAX_HP, HIT_DAMAGE, STICKY_GRACE_MS, AUTO_FIRE_HOLD_MS, SCORE_COMMIT_MS, INVESTIGATE_RADIUS_M } from '@/lib/game/constants'
+import { MAX_HP, HIT_DAMAGE, STICKY_GRACE_MS, AUTO_FIRE_HOLD_MS, SCORE_COMMIT_MS, INVESTIGATE_RADIUS_M, HUNTING_CONTROLLER_TTL_MS } from '@/lib/game/constants'
 import type { DetectedQR, LocalPlayerSession } from '@/types/game'
 import type { Player, QrCodeId, MarkerMode, GameMode, PlayerRole2 } from '@/types/database'
 
@@ -85,6 +93,9 @@ export default function GamePage() {
     exileId: string | null; exileRole: string | null; gameOver: boolean; winner: string | null
   } | null>(null)
   const [callingMeeting, setCallingMeeting] = useState(false)
+
+  // ── ハンティング（hunting）モード固有の状態 ──────────────────────────────
+  const [isNPCController, setIsNPCController] = useState(false)
 
   // ── オートファイア / スティッキー検知 ──────────────────────────────────────
   const [autoFireEnabled, setAutoFireEnabled] = useState(() => {
@@ -128,6 +139,11 @@ export default function GamePage() {
   const { players, realtimeStatus: playerStatus } =
     usePlayerRealtime(gameId, handleHpChange, handleKill)
   const { game, realtimeStatus: gameStatus }      = useGameRealtime(gameId)
+
+  // ゲームフェーズ・モード判定（フック呼び出しより前に宣言が必要）
+  const isLobby    = game?.status === 'lobby'
+  const isActive   = game?.status === 'active'
+  const isHuntingMode = game?.game_mode === 'hunting'
 
   // playersRef を最新状態に同期（captureKillcamRef 内で stale closure を避けるため）
   useEffect(() => { playersRef.current = players }, [players])
@@ -256,6 +272,44 @@ export default function GamePage() {
     onResolved: useCallback((result: { exileId: string | null; exileRole: string | null; gameOver: boolean; winner: string | null }) => {
       setMeetingResult(result)
     }, []),
+  })
+
+  // ── ハンティング（hunting）: NPC 状態購読 ────────────────────────────────
+  const npcState = useNPC({
+    gameId:       isHuntingMode ? gameId : undefined,
+    selfPlayerId: session?.playerId,
+    geoPos,
+    lastAttackAt: selfPlayer?.npc_attack_last_at ?? null,
+    enabled:      isActive && isHuntingMode,
+  })
+
+  // コントローラー引き継ぎ: heartbeat TTL 切れを検知したら claim を試みる
+  useEffect(() => {
+    if (!isActive || !isHuntingMode || !session) return
+    if (!npcState.needsController) return
+    claimController({ gameId, playerId: session.playerId, deviceId: session.deviceId })
+      .then(({ claimed }) => { if (claimed) setIsNPCController(true) })
+      .catch(() => {})
+  }, [isActive, isHuntingMode, session, npcState.needsController, gameId])
+
+  // NPC 移動ループ（コントローラーのみ実行）
+  useNPCController({
+    gameId,
+    session,
+    npc:          npcState.npc,
+    players,
+    isController: isNPCController && isActive && isHuntingMode,
+    enabled:      isActive && isHuntingMode,
+  })
+
+  // 振動フィードバック
+  useNPCVibration({
+    distM:           npcState.distM,
+    isBeingLockedOn: npcState.isBeingLockedOn,
+    lockonProgress:  npcState.lockonProgress,
+    isLungeArming:   npcState.isLungeArming,
+    isAlive:         selfPlayer?.is_alive ?? false,
+    enabled:         isActive && isHuntingMode,
   })
 
   // GPS: Sheriff の調査用 最近接プレイヤー（自分以外）
@@ -526,8 +580,6 @@ export default function GamePage() {
   // DB から取得した確定済みモード（全プレイヤー共通）
   const scanMode = (game?.marker_mode ?? 'qr') as MarkerMode
 
-  const isLobby  = game?.status === 'lobby'
-  const isActive = game?.status === 'active'
   const isDead   = selfPlayer && !selfPlayer.is_alive
 
   if (!session) {
@@ -634,7 +686,7 @@ export default function GamePage() {
         />
       )}
 
-      {/* 近接オブジェクト操作ボタン（サバイバル・タクティクス・バトル） */}
+      {/* 近接オブジェクト操作ボタン（サバイバル・タクティクス・バトル・hunting） */}
       {isActive && session && selfPlayer?.is_alive && (
         <ObjectiveAlert
           nearby={nearbyObjectivesWithBonus}
@@ -642,8 +694,57 @@ export default function GamePage() {
           gameId={gameId}
           team={selfPlayer?.team ?? 'none'}
           isTraitorMode={game?.game_mode === 'traitor'}
+          isHuntingMode={isHuntingMode}
           onCaptureDone={playCaptureDone}
           onGeneratorDone={playGeneratorAlert}
+        />
+      )}
+
+      {/* ── ハンティング（hunting）モード UI ────────────────────────────────── */}
+
+      {/* NPC HP バー（上部中央） */}
+      {isActive && isHuntingMode && npcState.npc && (
+        <NPCStatus npc={npcState.npc} visible />
+      )}
+
+      {/* NPC ロックオンビネット */}
+      {isActive && isHuntingMode && selfPlayer?.is_alive && (
+        <NPCAlert
+          isBeingLockedOn={npcState.isBeingLockedOn}
+          lockonProgress={npcState.lockonProgress}
+          distM={npcState.distM}
+          isLungeArming={npcState.isLungeArming}
+          lungeProgress={npcState.lungeProgress}
+        />
+      )}
+
+      {/* ランジ予告（全プレイヤーに表示） */}
+      {isActive && isHuntingMode && (
+        <NPCLungeWarning
+          isLungeArming={npcState.isLungeArming}
+          lungeProgress={npcState.lungeProgress}
+          lungeRadiusM={npcState.npc?.lunge_radius_m ?? 5}
+        />
+      )}
+
+      {/* 背後攻撃ボタン */}
+      {isActive && isHuntingMode && selfPlayer?.is_alive && session && npcState.npc && (
+        <NPCAttackButton
+          canAttack={npcState.canAttack}
+          isBehind={npcState.isBehind}
+          cooldownLeft={npcState.cooldownLeft}
+          isStunned={npcState.isStunned}
+          npcHp={npcState.npc.hp}
+          npcMaxHp={npcState.npc.max_hp}
+          onAttack={async () => {
+            if (!session || !npcState.npc) return
+            await attackNPC({
+              gameId,
+              playerId: session.playerId,
+              deviceId: session.deviceId,
+              npcId:    npcState.npc.id,
+            })
+          }}
         />
       )}
 

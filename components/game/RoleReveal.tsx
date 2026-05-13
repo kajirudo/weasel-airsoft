@@ -14,8 +14,8 @@ interface Props {
 }
 
 const ROLE_DESCRIPTIONS: Record<PlayerRole2, string> = {
-  crew:    'タスクをすべて完了させて Traitor を追放しよう',
-  traitor: '仲間と協力して Crew を全滅させるか、時間切れまで生き残れ',
+  crew:    'タスクをすべて完了させてスパイを追放しよう',
+  traitor: '仲間のスパイと協力して Crew を全滅させるか、時間切れまで生き残れ',
   sheriff: 'Crew を守れ。調査で怪しい人物の正体を暴け',
 }
 
@@ -64,10 +64,10 @@ export function RoleReveal({ role2, traitorNames, investigateUses = 0, onDone }:
         {ROLE_DESCRIPTIONS[role2]}
       </p>
 
-      {/* Traitor: 仲間一覧 */}
+      {/* スパイ: 仲間一覧 */}
       {role2 === 'traitor' && traitorNames.length > 1 && (
         <div className="mb-6 bg-red-900/60 rounded-xl p-4 text-center">
-          <p className="text-red-300 text-sm font-bold mb-2">🔴 仲間の Traitor</p>
+          <p className="text-red-300 text-sm font-bold mb-2">🔴 仲間のスパイ</p>
           {traitorNames
             .filter(n => n !== '') // 自分は別途表示
             .map(name => (

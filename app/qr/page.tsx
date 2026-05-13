@@ -1,8 +1,11 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { QR_CODE_IDS, QR_LABELS, QR_COLORS } from '@/lib/game/constants'
+import { QR_CODE_IDS, QR_LABELS, QR_COLORS, HUNTING_SEAL_COUNT } from '@/lib/game/constants'
 import type { QrCodeId } from '@/types/database'
+
+// 封印QRのID一覧（ハンティングモード用）
+const SEAL_IDS = Array.from({ length: HUNTING_SEAL_COUNT }, (_, i) => `seal_${i + 1}`) as string[]
 
 // ── 1プレイヤー分のカード ─────────────────────────────────────────────────────
 function PlayerCard({
@@ -52,6 +55,43 @@ function PlayerCard({
       <div className="footer">
         <p className="id-text">{id}</p>
         <p className="hint">このQRコードをベスト・背中など平らな場所に貼付してください</p>
+      </div>
+    </div>
+  )
+}
+
+// ── 封印QR（ハンティングモード）カード ───────────────────────────────────────────
+function SealCard({ sealId, index, isLast }: { sealId: string; index: number; isLast: boolean }) {
+  const [src, setSrc] = useState('')
+
+  useEffect(() => {
+    import('qrcode').then(({ toDataURL }) => {
+      toDataURL(sealId, {
+        width:  900,
+        margin: 2,
+        color:  { dark: '#000000', light: '#ffffff' },
+      }).then(setSrc)
+    })
+  }, [sealId])
+
+  return (
+    <div
+      className={`player-card${isLast ? '' : ' page-break'}`}
+      style={{ '--card-color': '#7c3aed' } as React.CSSProperties}
+    >
+      <div className="banner">
+        <span className="game-name">WEASEL AIRSOFT — ハンティングモード</span>
+        <span className="label">封印 {index}</span>
+      </div>
+      <div className="qr-area">
+        {src
+          ? <img src={src} alt={`封印QR ${index}`} className="qr-img" />
+          : <div className="qr-placeholder" />
+        }
+      </div>
+      <div className="footer">
+        <p className="id-text">{sealId}</p>
+        <p className="hint">フィールド内の地点に固定・設置してください（プレイヤーがスキャンで封印解除）</p>
       </div>
     </div>
   )
@@ -223,7 +263,7 @@ export default function QRPage() {
             QRコード — 印刷用
           </h1>
           <p style={{ color: '#9ca3af', fontSize: '0.875rem', marginTop: 4 }}>
-            各プレイヤーごとに A4 用紙 1 枚で出力されます（全{QR_CODE_IDS.length}枚）
+            プレイヤー {QR_CODE_IDS.length}枚 ＋ ハンティングモード封印QR {SEAL_IDS.length}枚
           </p>
 
           {/* ── モード切り替えタブ ── */}
@@ -251,7 +291,7 @@ export default function QRPage() {
                 padding: '10px 24px', borderRadius: 12, border: 'none', cursor: 'pointer',
               }}
             >
-              🖨️ 印刷する（{QR_CODE_IDS.length}枚）
+              🖨️ 印刷する（全{QR_CODE_IDS.length + SEAL_IDS.length}枚）
             </button>
             <a
               href="/lobby"
@@ -277,6 +317,9 @@ export default function QRPage() {
             <p>• 5m以上で使う場合はコンビニの拡大コピーで 25cm×25cm 以上に</p>
             <p>• ラミネート加工すると雨・汗・泥に強くなります</p>
             <p>• 各プレイヤーに 1 枚ずつ配布してください</p>
+            <p style={{ marginTop: 8, color: '#a78bfa', fontWeight: 700 }}>👹 ハンティングモード（封印QR）</p>
+            <p>• 封印QR {SEAL_IDS.length}枚はフィールド内の各地点に固定設置</p>
+            <p>• プレイヤーが近づいてスキャンすると封印解除（全解除でプレイヤー勝利）</p>
           </div>
         </div>
       </div>
@@ -289,7 +332,31 @@ export default function QRPage() {
             id={id}
             label={QR_LABELS[id]}
             color={QR_COLORS[id]}
-            isLast={i === QR_CODE_IDS.length - 1}
+            isLast={false}   // 封印QRが続くので常に改ページ
+          />
+        ))}
+
+        {/* ── 封印QR（青鬼モード） ─────────────────────────────────── */}
+        {/* 画面専用セクションヘッダー */}
+        <div className="no-print" style={{
+          width: '100%', maxWidth: 380, textAlign: 'center',
+          padding: '8px 0 4px',
+          borderTop: '2px solid #4c1d95',
+        }}>
+          <p style={{ color: '#a78bfa', fontWeight: 700, fontSize: '0.875rem' }}>
+            👹 ハンティングモード — 封印QR
+          </p>
+          <p style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: 2 }}>
+            フィールド内に設置する封印ポイント用QR
+          </p>
+        </div>
+
+        {SEAL_IDS.map((sealId, i) => (
+          <SealCard
+            key={sealId}
+            sealId={sealId}
+            index={i + 1}
+            isLast={i === SEAL_IDS.length - 1}
           />
         ))}
       </div>

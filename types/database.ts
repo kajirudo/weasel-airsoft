@@ -2,10 +2,10 @@ export type GameStatus    = 'lobby' | 'active' | 'finished'
 export type QrCodeId     = 'player_1' | 'player_2' | 'player_3' | 'player_4' | 'player_5' | 'player_6'
 export type Team         = 'none' | 'red' | 'blue'
 export type MarkerMode   = 'qr' | 'aruco'
-export type GameMode     = 'battle' | 'survival' | 'tactics' | 'traitor'
+export type GameMode     = 'battle' | 'survival' | 'tactics' | 'traitor' | 'hunting'
 export type PlayerRole   = 'survivor' | 'hunter'
 export type PlayerRole2  = 'crew' | 'traitor' | 'sheriff'
-export type ObjectiveType = 'medkit' | 'damage_boost' | 'generator' | 'control_point'
+export type ObjectiveType = 'medkit' | 'damage_boost' | 'generator' | 'control_point' | 'seal'
 export type SabotageType = 'comms'
 
 export interface Game {
@@ -70,6 +70,8 @@ export interface Player {
   tasks_done:       number
   meeting_uses:     number
   investigate_uses: number
+  // ハンティング（hunting）モード
+  npc_attack_last_at: string | null
 }
 
 export interface TraitorVote {
@@ -87,7 +89,7 @@ export interface GameObjective {
   lat:            number
   lng:            number
   type:           ObjectiveType
-  // アイテム
+  // アイテム / 封印QR
   is_claimed:     boolean
   claimed_by:     string | null
   // 発電機
@@ -99,5 +101,32 @@ export interface GameObjective {
   control_since:  string | null
   capture_start:  string | null
   capturing_team: 'red' | 'blue' | null
+  // 封印QR（hunting モード）
+  seal_index:     number | null
   created_at:     string
+}
+
+/** ハンティングモード NPC レコード */
+export interface GameNpc {
+  id:                   string
+  game_id:              string
+  hp:                   number
+  max_hp:               number
+  lat:                  number | null
+  lng:                  number | null
+  heading:              number
+  speed_mps:            number
+  lockon_target_id:     string | null
+  lockon_start_at:      string | null
+  lockon_seconds:       number
+  catch_range_m:        number
+  lunge_armed_at:       string | null
+  lunge_fire_at:        string | null
+  last_lunge_at:        string | null
+  lunge_interval_s:     number
+  lunge_radius_m:       number
+  stun_until:           string | null
+  confused_until:       string | null
+  controller_id:        string | null
+  controller_heartbeat: string | null
 }

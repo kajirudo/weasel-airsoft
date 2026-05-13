@@ -188,7 +188,7 @@ function ResolveScreen({
             className="text-5xl font-black mb-4"
             style={{ color: wasTraitor ? '#ef4444' : '#22c55e' }}
           >
-            {wasTraitor ? '🕵️ TRAITOR' : '👷 CREW'}
+            {wasTraitor ? '🕵️ SPY' : '👷 CREW'}
           </div>
           {!wasTraitor && (
             <p className="text-yellow-400 font-bold text-lg">⚠️ 無実の Crew でした…</p>

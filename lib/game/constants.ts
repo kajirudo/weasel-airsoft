@@ -49,10 +49,11 @@ export const QR_LABELS: Record<QrCodeId, string> = {
 
 // ── ゲームモード ──────────────────────────────────────────────────────────────
 export const GAME_MODE_LABELS: Record<GameMode, string> = {
-  battle:   '🌀 バトル（縮小マップ）',
+  battle:   '🌀 バトル（戦って勝ち残れ）',
   survival: '🔦 サバイバル（Hunter vs Survivors）',
   tactics:  '🏴 タクティクス（拠点争奪）',
-  traitor:  '🕵️ Traitor（Among Us型 心理戦）',
+  traitor:  '🕵️ スパイ（スパイを探せ）',
+  hunting:  '👹 ハンティング（NPC討伐）',
 }
 
 // ── Traitor モード ─────────────────────────────────────────────────────────
@@ -63,7 +64,7 @@ export const TASK_HOLD_MS           = 10_000   // タスク完了に必要なホ
 
 export const ROLE2_LABELS: Record<import('@/types/database').PlayerRole2, string> = {
   crew:    'CREW',
-  traitor: 'TRAITOR',
+  traitor: 'SPY',
   sheriff: 'SHERIFF',
 }
 
@@ -97,6 +98,53 @@ export const HUNTER_HP            = 200  // Hunter の初期 HP
 export const SCORE_SECS_PER_POINT = 10
 /** ホストクライアントがスコアをコミットする間隔 */
 export const SCORE_COMMIT_MS      = 30_000
+
+// ── ハンティング（hunting）モード ──────────────────────────────────────────────
+export const HUNTING_NPC_HP_BASE       = 300    // 3人以上の基準HP
+export const HUNTING_NPC_SPEED_BASE    = 1.5    // 基準移動速度（m/s）
+export const HUNTING_LOCKON_SEC_BASE   = 2.0    // ロックオン捕食までの秒数
+export const HUNTING_LOCKON_RANGE_M    = 10     // ロックオン開始距離（m）
+export const HUNTING_BACKSTAB_RANGE_M  = 15     // 背後攻撃射程（m）
+export const HUNTING_BACKSTAB_ANGLE    = 45     // 背後判定角度（±°）
+export const HUNTING_BACKSTAB_DAMAGE   = 50     // 背後攻撃ダメージ
+export const HUNTING_STUN_SEC          = 10     // スタン時間（s）
+export const HUNTING_CONFUSED_SEC      = 5      // 見失い停止時間（s）
+export const HUNTING_ATTACK_COOLDOWN_MS = 30_000 // プレイヤー別攻撃クールダウン
+export const HUNTING_LUNGE_INTERVAL_S  = 30     // ランジ周期（s）
+export const HUNTING_LUNGE_WARN_SEC    = 2      // ランジ予告時間（s）
+export const HUNTING_LUNGE_RADIUS_M    = 5      // ランジ捕食半径（m）
+export const HUNTING_SEAL_COUNT        = 5      // 封印QR数（デフォルト）
+export const HUNTING_CONTROLLER_TTL_MS = 10_000 // コントローラー heartbeat タイムアウト
+export const HUNTING_MOVE_INTERVAL_MS  = 2_000  // NPC 移動ループ間隔
+export const HUNTING_OFFLINE_THRESHOLD_MS = 30_000  // オフライン判定（ロックオン除外）
+
+/** ソロ調整: 1人時のNPC弱体化パラメータ */
+export const HUNTING_SOLO_HP       = 150
+export const HUNTING_SOLO_SPEED    = 1.0
+export const HUNTING_SOLO_LOCKON   = 3.0
+export const HUNTING_SOLO_LUNGE_S  = 45
+
+/** 2人時の調整 */
+export const HUNTING_DUO_HP        = 200
+export const HUNTING_DUO_SPEED     = 1.2
+export const HUNTING_DUO_LOCKON    = 2.5
+export const HUNTING_DUO_LUNGE_S   = 35
+
+/** プレイヤー人数からNPCステータスを決定 */
+export function huntingNPCStats(playerCount: number) {
+  if (playerCount <= 1) return {
+    hp: HUNTING_SOLO_HP, speedMps: HUNTING_SOLO_SPEED,
+    lockonSeconds: HUNTING_SOLO_LOCKON, lungeIntervalS: HUNTING_SOLO_LUNGE_S,
+  }
+  if (playerCount === 2) return {
+    hp: HUNTING_DUO_HP, speedMps: HUNTING_DUO_SPEED,
+    lockonSeconds: HUNTING_DUO_LOCKON, lungeIntervalS: HUNTING_DUO_LUNGE_S,
+  }
+  return {
+    hp: HUNTING_NPC_HP_BASE, speedMps: HUNTING_NPC_SPEED_BASE,
+    lockonSeconds: HUNTING_LOCKON_SEC_BASE, lungeIntervalS: HUNTING_LUNGE_INTERVAL_S,
+  }
+}
 
 export const QR_COLORS: Record<QrCodeId, string> = {
   player_1: '#ef4444',

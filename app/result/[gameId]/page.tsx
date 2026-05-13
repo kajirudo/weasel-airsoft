@@ -72,7 +72,7 @@ export default async function ResultPage({ params }: ResultPageProps) {
                 {winnerTeam === 'red'      ? '🔴 赤チーム'       :
                  winnerTeam === 'blue'     ? '🔵 青チーム'       :
                  winnerTeam === 'crew'     ? '👷 Crew'          :
-                 winnerTeam === 'traitor'  ? '🕵️ Traitor'      :
+                 winnerTeam === 'traitor'  ? '🕵️ スパイ'        :
                  winnerTeam === 'hunter'   ? '🔦 Hunter'        :
                  winnerTeam === 'survivor' ? '✨ Survivor'      :
                  winnerTeam}

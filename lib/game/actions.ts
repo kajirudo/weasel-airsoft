@@ -130,6 +130,8 @@ export async function startGame(params: {
   traitorCount?:    number
   /** Traitor モード: Sheriff 有効 */
   sheriffEnabled?:  boolean
+  /** hunting モード: 封印QR 数（fieldRadiusM を流用） */
+  sealCount?:       number
 }): Promise<void> {
   const {
     gameId, hitDamage, shootCooldown, durationMinutes,
@@ -221,11 +223,21 @@ export async function startGame(params: {
     const genCount = await generateObjectivesInternal(supabase, {
       gameId, centerLat: fieldCenterLat, centerLng: fieldCenterLng,
       radiusM: fieldRadiusM, gameMode, playerCount, survivorCount,
+      sealCount: params.sealCount,
     })
     // Traitor モード: 生成した発電機の数を task_goal に設定
     if (gameMode === 'traitor' && genCount > 0) {
       await supabase.from('games').update({ task_goal: genCount }).eq('id', gameId)
     }
+  }
+
+  // ── ハンティングモード: NPC を初期化 ─────────────────────────────────────────
+  if (gameMode === 'hunting' && fieldCenterLat != null && fieldCenterLng != null) {
+    const { data: players } = await supabase
+      .from('players').select('id').eq('game_id', gameId)
+    const playerCount = players?.length ?? 1
+    const { initNPC } = await import('@/lib/game/npcActions')
+    await initNPC({ gameId, lat: fieldCenterLat, lng: fieldCenterLng, playerCount })
   }
 }
 
@@ -242,14 +254,36 @@ async function generateObjectivesInternal(
     gameMode:      GameMode
     playerCount:   number
     survivorCount: number
+    sealCount?:    number
   },
 ): Promise<number> {
   const { gameId, centerLat, centerLng, radiusM, gameMode, playerCount, survivorCount } = params
+  const sealCount = params.sealCount ?? 5
 
-  type ObjInsert = { game_id: string; lat: number; lng: number; type: string }
+  type ObjInsert = {
+    game_id:    string; lat: number; lng: number; type: string;
+    seal_index?: number
+  }
   const inserts: ObjInsert[] = []
 
-  // タイプ別の個数を決定
+  // ハンティングモード: 封印QR のみ散布
+  if (gameMode === 'hunting') {
+    const fieldR = Math.max(20, sealCount * 20)  // 封印QR数×20m を散布半径に
+    const points = scatterPoints(centerLat, centerLng, sealCount, fieldR, 15)
+    for (let i = 0; i < points.length; i++) {
+      inserts.push({
+        game_id:    gameId,
+        lat:        points[i].lat,
+        lng:        points[i].lng,
+        type:       'seal',
+        seal_index: i + 1,
+      })
+    }
+    if (inserts.length > 0) await supabase.from('game_objectives').insert(inserts)
+    return 0  // generator 数は 0（hunting は task_goal 不使用）
+  }
+
+  // タイプ別の個数を決定（既存モード）
   const counts = gameMode === 'survival'
     ? { generator: survivorCount + 1, medkit: Math.max(1, survivorCount - 1), damage_boost: 2, control_point: 0 }
     : gameMode === 'tactics'
