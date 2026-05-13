@@ -3,7 +3,9 @@
 import { createServerClient } from '@/lib/supabase/server'
 import { QR_CODE_IDS, SCORE_SECS_PER_POINT, STORM_DAMAGE_HP } from '@/lib/game/constants'
 import { geoDistM } from '@/lib/game/geo'
-import type { QrCodeId, MarkerMode, GameMode } from '@/types/database'
+import { spawnBots } from '@/lib/game/botActions'
+import type { QrCodeId, MarkerMode, GameMode, Team } from '@/types/database'
+import type { BotDifficulty } from '@/lib/game/constants'
 
 function randomGeo(lat: number, lng: number, maxR: number) {
   const angle      = Math.random() * 2 * Math.PI
@@ -125,6 +127,10 @@ export async function startGame(params: {
   sheriffEnabled?:  boolean
   /** hunting モード: 封印QR 数（fieldRadiusM を流用） */
   sealCount?:       number
+  /** ソロプレイ: ボット数（0 = ソロ無効） */
+  botCount?:        number
+  /** ソロプレイ: ボット難易度 */
+  botDifficulty?:   BotDifficulty
 }): Promise<void> {
   const {
     gameId, hitDamage, shootCooldown, durationMinutes,
@@ -232,6 +238,26 @@ export async function startGame(params: {
     const playerCount = players?.length ?? 1
     const { initNPC } = await import('@/lib/game/npcActions')
     await initNPC({ gameId, lat: fieldCenterLat, lng: fieldCenterLng, playerCount })
+  }
+
+  // ── ソロプレイ: ボットをスポーン ─────────────────────────────────────────────
+  const botCount = params.botCount ?? 0
+  if (botCount > 0 && gameMode !== 'hunting' && fieldCenterLat != null && fieldCenterLng != null) {
+    // タクティクスモード: プレイヤーのチームを確認して対立チームをボットに割り当て
+    let playerTeam: Team | undefined
+    if (gameMode === 'tactics') {
+      const { data: firstPlayer } = await supabase.from('players')
+        .select('team').eq('game_id', gameId).eq('is_bot', false).limit(1).single()
+      playerTeam = (firstPlayer?.team ?? 'red') as Team
+    }
+    await spawnBots({
+      gameId, gameMode, botCount,
+      difficulty:     params.botDifficulty ?? 'normal',
+      fieldCenterLat, fieldCenterLng,
+      fieldRadiusM,
+      traitorCount:   params.traitorCount,
+      playerTeam,
+    })
   }
 }
 

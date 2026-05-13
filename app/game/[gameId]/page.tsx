@@ -45,15 +45,18 @@ import { useMeeting }            from '@/hooks/useMeeting'
 import { useNPC }                from '@/hooks/useNPC'
 import { useNPCController }      from '@/hooks/useNPCController'
 import { useNPCVibration }       from '@/hooks/useNPCVibration'
+import { useBotController }      from '@/hooks/useBotController'
 import {
   registerHit, startGame, finishGameByTimeout, saveKillcamUrl, commitTacticsScore,
   getMyRole, callMeeting, submitVote, resolveMeeting, useSabotage, investigatePlayer,
 } from '@/lib/game/actions'
+import { playerShootBot } from '@/lib/game/botActions'
 import { attackNPC, claimController } from '@/lib/game/npcActions'
 import { isHostPlayer } from '@/lib/game/utils'
 import { compositeKillcam }      from '@/lib/game/killcam-capture'
 import { createClient }          from '@/lib/supabase/client'
-import { MAX_HP, HIT_DAMAGE, STICKY_GRACE_MS, AUTO_FIRE_HOLD_MS, SCORE_COMMIT_MS, INVESTIGATE_RADIUS_M, HUNTING_CONTROLLER_TTL_MS } from '@/lib/game/constants'
+import { MAX_HP, HIT_DAMAGE, STICKY_GRACE_MS, AUTO_FIRE_HOLD_MS, SCORE_COMMIT_MS, INVESTIGATE_RADIUS_M, HUNTING_CONTROLLER_TTL_MS, BOT_SHOOT_RANGE_M } from '@/lib/game/constants'
+import { geoDistM } from '@/lib/game/geo'
 import type { DetectedQR, LocalPlayerSession } from '@/types/game'
 import type { Player, QrCodeId, MarkerMode, GameMode, PlayerRole2 } from '@/types/database'
 
@@ -78,6 +81,9 @@ export default function GamePage() {
     fieldRadiusM:    80,
     traitorCount:    1,
     sheriffEnabled:  false,
+    soloMode:        false,
+    botCount:        3,
+    botDifficulty:   'normal' as import('@/lib/game/constants').BotDifficulty,
   })
 
   // ゲームレコードから markerMode を初期化（game が読み込まれた時点で同期）
@@ -96,6 +102,9 @@ export default function GamePage() {
 
   // ── ハンティング（hunting）モード固有の状態 ──────────────────────────────
   const [isNPCController, setIsNPCController] = useState(false)
+
+  // ── ソロプレイ（ボット）固有の状態 ──────────────────────────────────────
+  const [isBotShooting, setIsBotShooting] = useState(false)
 
   // ── オートファイア / スティッキー検知 ──────────────────────────────────────
   const [autoFireEnabled, setAutoFireEnabled] = useState(() => {
@@ -291,6 +300,28 @@ export default function GamePage() {
       .then(({ claimed }) => { if (claimed) setIsNPCController(true) })
       .catch(() => {})
   }, [isActive, isHuntingMode, session, npcState.needsController, gameId])
+
+  // ── ソロプレイ（ボット）制御 ──────────────────────────────────────────────
+  const bots         = players.filter(p => p.is_bot)
+  const humanPlayers = players.filter(p => !p.is_bot)
+  const isSoloMode   = bots.length > 0 && isActive
+
+  useBotController({
+    gameId,
+    session,
+    bots,
+    players,
+    objectives: objectives ?? [],
+    gameMode:   (game?.game_mode ?? 'battle') as GameMode,
+    meetingId:  game?.meeting_id ?? null,
+    fieldCenter: game?.storm_center_lat != null && game?.storm_center_lng != null
+      ? { lat: game.storm_center_lat, lng: game.storm_center_lng }
+      : null,
+    fieldRadiusM:  balanceSettings.fieldRadiusM,
+    difficulty:    balanceSettings.botDifficulty,
+    isController:  isHost,   // ホストがボットを制御
+    enabled:       isSoloMode,
+  })
 
   // NPC 移動ループ（コントローラーのみ実行）
   useNPCController({
@@ -578,6 +609,8 @@ export default function GamePage() {
         fieldRadiusM:     balanceSettings.fieldRadiusM,
         traitorCount:     balanceSettings.traitorCount,
         sheriffEnabled:   balanceSettings.sheriffEnabled,
+        botCount:         balanceSettings.soloMode ? balanceSettings.botCount : 0,
+        botDifficulty:    balanceSettings.botDifficulty,
       })
     } catch { setIsStarting(false) }
   }
@@ -753,6 +786,62 @@ export default function GamePage() {
         />
       )}
 
+      {/* ── ソロプレイ: 近接ボット攻撃パネル ─────────────────────────────────── */}
+      {isActive && isSoloMode && selfPlayer?.is_alive && geoPos && (() => {
+        const nearbyBots = bots.filter(b => {
+          if (!b.is_alive || !b.lat || !b.lng) return false
+          return geoDistM({ lat: geoPos.lat, lng: geoPos.lng }, { lat: b.lat, lng: b.lng }) <= BOT_SHOOT_RANGE_M
+        }).sort((a, b) => {
+          const da = geoDistM({ lat: geoPos.lat, lng: geoPos.lng }, { lat: a.lat!, lng: a.lng! })
+          const db = geoDistM({ lat: geoPos.lat, lng: geoPos.lng }, { lat: b.lat!, lng: b.lng! })
+          return da - db
+        })
+        if (nearbyBots.length === 0) return null
+        return (
+          <div className="fixed bottom-32 left-0 right-0 flex justify-center z-40 pointer-events-none">
+            <div className="bg-black/80 rounded-2xl px-4 py-3 flex flex-col gap-2 max-w-xs w-full mx-4 pointer-events-auto">
+              <p className="text-gray-400 text-xs text-center">🎯 射程内の CPU</p>
+              {nearbyBots.slice(0, 3).map(bot => {
+                const dist = geoDistM({ lat: geoPos.lat, lng: geoPos.lng }, { lat: bot.lat!, lng: bot.lng! })
+                return (
+                  <button
+                    key={bot.id}
+                    disabled={isBotShooting}
+                    className="flex items-center justify-between bg-red-900/40 border border-red-700/50 rounded-xl px-3 py-2 active:bg-red-800/60 disabled:opacity-50"
+                    onPointerDown={async () => {
+                      if (!session || isBotShooting) return
+                      setIsBotShooting(true)
+                      try {
+                        const result = await playerShootBot({
+                          gameId,
+                          playerId: session.playerId,
+                          deviceId: session.deviceId,
+                          botId:    bot.id,
+                        })
+                        if (result.hit) {
+                          result.gameOver ? playKill() : playShot()
+                          triggerFlash()
+                        }
+                      } catch { /* ignore */ }
+                      setIsBotShooting(false)
+                    }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">🤖</span>
+                      <div className="text-left">
+                        <p className="text-white font-bold text-sm">{bot.name}</p>
+                        <p className="text-gray-400 text-xs">HP {bot.hp} / {dist.toFixed(0)}m</p>
+                      </div>
+                    </div>
+                    <span className="text-red-400 font-black text-lg">攻撃</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
+
       {/* ── Traitor モード UI ───────────────────────────────────────────────── */}
 
       {/* タスク進捗バー + 緊急集会ボタン */}
@@ -897,7 +986,7 @@ export default function GamePage() {
           </div>
           {isHost && (
             <div className="w-full max-w-xs">
-              <GameSettings {...balanceSettings} onChange={setBalance} />
+              <GameSettings {...balanceSettings} onChange={setBalance} playerCount={humanPlayers.length || players.length} />
             </div>
           )}
           {/* 非ホスト向けモード表示 */}
@@ -919,14 +1008,16 @@ export default function GamePage() {
               </a>
             </div>
           )}
-          {isHost && players.length >= 2 && (
+          {isHost && (players.length >= 2 || balanceSettings.soloMode) && (
             <Button onClick={handleStartGame} loading={isStarting}>
-              ゲーム開始 ({players.length}人)
+              {balanceSettings.soloMode
+                ? `ソロ開始 (CPU${balanceSettings.botCount}体)`
+                : `ゲーム開始 (${players.length}人)`}
             </Button>
           )}
-          {isHost && players.length < 2 && (
+          {isHost && players.length < 2 && !balanceSettings.soloMode && (
             <p className="text-gray-300 text-sm bg-black/60 px-3 py-1 rounded-lg">
-              あと{2 - players.length}人参加で開始できます
+              あと{2 - players.length}人参加で開始 / またはソロモードをオン
             </p>
           )}
           {!isHost && (

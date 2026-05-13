@@ -4,12 +4,10 @@ import { usePlayerRealtime } from '@/hooks/usePlayerRealtime'
 import type { QrCodeId } from '@/types/database'
 
 const QR_LABELS: Record<QrCodeId, string> = {
-  player_1: 'P1',
-  player_2: 'P2',
-  player_3: 'P3',
-  player_4: 'P4',
-  player_5: 'P5',
-  player_6: 'P6',
+  player_1: 'P1', player_2: 'P2', player_3: 'P3',
+  player_4: 'P4', player_5: 'P5', player_6: 'P6',
+  bot_1: 'CPU', bot_2: 'CPU', bot_3: 'CPU', bot_4: 'CPU',
+  bot_5: 'CPU', bot_6: 'CPU', bot_7: 'CPU', bot_8: 'CPU',
 }
 
 interface PlayerListProps {

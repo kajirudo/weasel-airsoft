@@ -1,5 +1,7 @@
 export type GameStatus    = 'lobby' | 'active' | 'finished'
-export type QrCodeId     = 'player_1' | 'player_2' | 'player_3' | 'player_4' | 'player_5' | 'player_6'
+export type QrCodeId     =
+  | 'player_1' | 'player_2' | 'player_3' | 'player_4' | 'player_5' | 'player_6'
+  | 'bot_1'    | 'bot_2'    | 'bot_3'    | 'bot_4'    | 'bot_5'    | 'bot_6'    | 'bot_7' | 'bot_8'
 export type Team         = 'none' | 'red' | 'blue'
 export type MarkerMode   = 'qr' | 'aruco'
 export type GameMode     = 'battle' | 'survival' | 'tactics' | 'traitor' | 'hunting'
@@ -7,6 +9,8 @@ export type PlayerRole   = 'survivor' | 'hunter'
 export type PlayerRole2  = 'crew' | 'traitor' | 'sheriff'
 export type ObjectiveType = 'medkit' | 'damage_boost' | 'generator' | 'control_point' | 'seal'
 export type SabotageType = 'comms'
+/** ソロプレイ用ボットの行動パターン */
+export type BotBehavior  = 'roamer' | 'defender' | 'rusher' | 'crew_bot' | 'spy_bot'
 
 export interface Game {
   id:               string
@@ -72,6 +76,9 @@ export interface Player {
   investigate_uses: number
   // ハンティング（hunting）モード
   npc_attack_last_at: string | null
+  // ソロプレイ用ボット
+  is_bot:        boolean
+  bot_behavior:  BotBehavior | null
 }
 
 export interface TraitorVote {

@@ -1,6 +1,6 @@
 'use client'
 
-import type { MarkerMode, GameMode } from '@/lib/game/constants'
+import type { MarkerMode, GameMode, BotDifficulty } from '@/lib/game/constants'
 import {
   GAME_MODE_LABELS,
   HUNTING_SOLO_HP, HUNTING_SOLO_SPEED, HUNTING_SOLO_LOCKON,
@@ -8,6 +8,7 @@ import {
   HUNTING_NPC_HP_BASE, HUNTING_NPC_SPEED_BASE, HUNTING_LOCKON_SEC_BASE,
   HUNTING_BACKSTAB_RANGE_M, HUNTING_BACKSTAB_ANGLE,
   HUNTING_ATTACK_COOLDOWN_MS,
+  BOT_DIFFICULTY_LABELS, BOT_SHOOT_RANGE_M,
 } from '@/lib/game/constants'
 
 export interface GameSettingsValues {
@@ -23,10 +24,16 @@ export interface GameSettingsValues {
   // Traitor モード
   traitorCount:    number
   sheriffEnabled:  boolean
+  // ソロプレイ
+  soloMode:        boolean
+  botCount:        number
+  botDifficulty:   BotDifficulty
 }
 
 interface GameSettingsProps extends GameSettingsValues {
-  onChange: (settings: GameSettingsValues) => void
+  onChange:      (settings: GameSettingsValues) => void
+  /** ロビーにいる実プレイヤー数（ソロ判定の参考表示用） */
+  playerCount?:  number
 }
 
 function SliderField({
@@ -63,6 +70,8 @@ export function GameSettings({
   hitDamage, shootCooldown, durationMinutes, teamMode, markerMode,
   gameMode, stormRadiusM, stormFinalM, fieldRadiusM,
   traitorCount, sheriffEnabled,
+  soloMode, botCount, botDifficulty,
+  playerCount,
   onChange,
 }: GameSettingsProps) {
   const set = (partial: Partial<GameSettingsValues>) =>
@@ -70,13 +79,16 @@ export function GameSettings({
       hitDamage, shootCooldown, durationMinutes, teamMode, markerMode,
       gameMode, stormRadiusM, stormFinalM, fieldRadiusM,
       traitorCount, sheriffEnabled,
+      soloMode, botCount, botDifficulty,
       ...partial,
     })
 
   function handleGameModeChange(mode: GameMode) {
     // タクティクスはチームモード強制オン、Traitor はチームモード無効
     const newTeamMode = mode === 'tactics' ? true : mode === 'traitor' ? false : teamMode
-    set({ gameMode: mode, teamMode: newTeamMode })
+    // hunting はソロモード無効（既に NPC が存在するため）
+    const newSolo = mode === 'hunting' ? false : soloMode
+    set({ gameMode: mode, teamMode: newTeamMode, soloMode: newSolo })
   }
 
   return (
@@ -217,6 +229,67 @@ export function GameSettings({
           <p className="text-gray-600 text-xs">
             ホストの GPS 位置を中心に、この半径内にランダム配置されます。
           </p>
+        </div>
+      )}
+
+      {/* ── ソロプレイ ───────────────────────────────────────────────────────── */}
+      {gameMode !== 'hunting' && (
+        <div className="space-y-3 border border-cyan-900/50 rounded-lg p-3 bg-cyan-900/10">
+          <label className="flex items-center justify-between cursor-pointer select-none">
+            <div>
+              <span className="text-cyan-300 text-xs font-semibold">🤖 ソロプレイ（CPU 対戦）</span>
+              <p className="text-gray-600 text-xs mt-0.5">
+                {soloMode
+                  ? `CPU ${botCount}体と対戦。GPS 近接で自動攻撃。`
+                  : '1人でもプレイ可能。CPUボットを追加します。'}
+              </p>
+              {soloMode && playerCount != null && playerCount <= 1 && (
+                <p className="text-cyan-600 text-xs mt-0.5">💡 あなた 1 人 + CPU {botCount}体でスタート</p>
+              )}
+            </div>
+            <div
+              onClick={() => set({ soloMode: !soloMode })}
+              className={`w-10 h-6 rounded-full transition-colors relative cursor-pointer flex-shrink-0 ${
+                soloMode ? 'bg-cyan-600' : 'bg-gray-700'
+              }`}
+            >
+              <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${soloMode ? 'left-5' : 'left-1'}`} />
+            </div>
+          </label>
+
+          {soloMode && (
+            <>
+              <SliderField
+                label="CPU 数" value={botCount} min={1} max={8} step={1}
+                displayValue={`${botCount}体`}
+                onChange={(v) => set({ botCount: v })}
+              />
+              <div>
+                <p className="text-gray-400 text-xs mb-1.5">CPU 難易度</p>
+                <div className="flex gap-1.5">
+                  {(Object.entries(BOT_DIFFICULTY_LABELS) as [import('@/lib/game/constants').BotDifficulty, string][]).map(([d, label]) => (
+                    <button
+                      key={d}
+                      onClick={() => set({ botDifficulty: d })}
+                      className={[
+                        'flex-1 py-1.5 rounded-lg text-xs font-bold border transition-all',
+                        botDifficulty === d
+                          ? 'bg-cyan-600/30 border-cyan-500 text-cyan-300'
+                          : 'bg-gray-800 border-gray-700 text-gray-500',
+                      ].join(' ')}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="text-gray-600 text-xs space-y-0.5 bg-gray-900/50 rounded-lg p-2">
+                <p>🎯 攻撃射程: <span className="text-cyan-400">{BOT_SHOOT_RANGE_M}m（GPS 近接）</span></p>
+                <p className="text-gray-700">CPU は QR スキャン不要・近づくと自動攻撃</p>
+                <p className="text-gray-700">あなたも近接ボタンで CPU を攻撃できます</p>
+              </div>
+            </>
+          )}
         </div>
       )}
 

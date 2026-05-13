@@ -1,5 +1,5 @@
-import type { QrCodeId, MarkerMode, GameMode } from '@/types/database'
-export type { MarkerMode, GameMode }
+import type { QrCodeId, MarkerMode, GameMode, BotBehavior } from '@/types/database'
+export type { MarkerMode, GameMode, BotBehavior }
 
 // ── マーカーモード ────────────────────────────────────────────────────────────
 export const MARKER_MODE_KEY     = 'weasel_marker_mode'
@@ -45,6 +45,8 @@ export const QR_CODE_IDS: QrCodeId[] = [
 export const QR_LABELS: Record<QrCodeId, string> = {
   player_1: 'P1', player_2: 'P2', player_3: 'P3',
   player_4: 'P4', player_5: 'P5', player_6: 'P6',
+  bot_1: 'CPU', bot_2: 'CPU', bot_3: 'CPU',
+  bot_4: 'CPU', bot_5: 'CPU', bot_6: 'CPU', bot_7: 'CPU', bot_8: 'CPU',
 }
 
 // ── ゲームモード ──────────────────────────────────────────────────────────────
@@ -153,4 +155,45 @@ export const QR_COLORS: Record<QrCodeId, string> = {
   player_4: '#f59e0b',
   player_5: '#a855f7',
   player_6: '#ec4899',
+  bot_1: '#94a3b8',
+  bot_2: '#94a3b8',
+  bot_3: '#94a3b8',
+  bot_4: '#94a3b8',
+  bot_5: '#94a3b8',
+  bot_6: '#94a3b8',
+  bot_7: '#94a3b8',
+  bot_8: '#94a3b8',
+}
+
+// ── ソロプレイ / ボットシステム ────────────────────────────────────────────────
+/** ボット名（CPU①〜CPU⑧） */
+export const BOT_NAMES = ['CPU①','CPU②','CPU③','CPU④','CPU⑤','CPU⑥','CPU⑦','CPU⑧'] as const
+
+/** ボットが攻撃可能な GPS 距離（m） */
+export const BOT_SHOOT_RANGE_M = 15
+
+/** ボット制御ループ間隔（NPC コントローラーと同じ） */
+export const BOT_MOVE_INTERVAL_MS = 2_000
+
+/** ボット 1 ステップの移動量計算用（tick 間隔） */
+export const BOT_TASK_COMPLETE_MS = 40_000   // crew_bot がタスクを 1 つ完了する間隔
+
+/** 難易度別パラメータ */
+export type BotDifficulty = 'easy' | 'normal' | 'hard'
+
+export const BOT_SPEED_MPS: Record<BotDifficulty, number> = {
+  easy: 0.7, normal: 1.2, hard: 1.8,
+}
+export const BOT_ACCURACY: Record<BotDifficulty, number> = {
+  easy: 0.35, normal: 0.60, hard: 0.85,
+}
+/** ボットの射撃クールダウン（ms） */
+export const BOT_SHOOT_COOLDOWN_MS: Record<BotDifficulty, number> = {
+  easy: 6_000, normal: 4_000, hard: 2_500,
+}
+
+export const BOT_DIFFICULTY_LABELS: Record<BotDifficulty, string> = {
+  easy:   '😊 かんたん',
+  normal: '😐 ふつう',
+  hard:   '😈 むずかしい',
 }
