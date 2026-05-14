@@ -67,6 +67,7 @@ export default function GamePage() {
   const [session, setSession]         = useState<LocalPlayerSession | null>(null)
   const [detectedQR, setDetectedQR]   = useState<DetectedQR | null>(null)
   const [isStarting, setIsStarting]   = useState(false)
+  const [showExitConfirm, setShowExitConfirm] = useState(false)
   const [balanceSettings, setBalance] = useState<GameSettingsValues>({
     hitDamage:       HIT_DAMAGE,
     shootCooldown:   DEFAULT_SHOOT_COOLDOWN,
@@ -1018,6 +1019,13 @@ export default function GamePage() {
               ホストがゲームを開始するまで待機中...
             </p>
           )}
+          {/* 退出ボタン */}
+          <button
+            onClick={() => { sessionStorage.removeItem('weasel_session'); router.replace('/lobby') }}
+            className="text-gray-500 text-xs underline underline-offset-2 mt-1"
+          >
+            ロビーに戻る
+          </button>
         </div>
       )}
 
@@ -1068,6 +1076,40 @@ export default function GamePage() {
             </button>
           </div>
         </>
+      )}
+
+      {/* ─── ゲーム中退出ボタン ────────────────────────────────────────────── */}
+      {isActive && (
+        <button
+          onClick={() => setShowExitConfirm(true)}
+          className="absolute top-4 left-4 z-40 bg-black/60 border border-gray-700 text-gray-400 text-xs font-bold px-3 py-1.5 rounded-full backdrop-blur-sm active:bg-black/80"
+        >
+          退出
+        </button>
+      )}
+
+      {/* 退出確認ダイアログ */}
+      {showExitConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 mx-6 max-w-xs w-full space-y-4">
+            <p className="text-white font-bold text-center">ゲームを退出しますか？</p>
+            <p className="text-gray-400 text-xs text-center">退出後はロビーに戻ります。ゲームは継続されます。</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowExitConfirm(false)}
+                className="flex-1 py-2 rounded-xl border border-gray-600 text-gray-400 text-sm font-bold"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={() => { sessionStorage.removeItem('weasel_session'); router.replace('/lobby') }}
+                className="flex-1 py-2 rounded-xl bg-red-600 text-white text-sm font-bold"
+              >
+                退出
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ─── Kill Cam オーバーレイ（自分が撃たれたとき） ─────────────────── */}
