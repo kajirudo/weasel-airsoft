@@ -12,7 +12,7 @@
  */
 
 import { createServerClient } from '@/lib/supabase/server'
-import { geoDistM }           from '@/lib/game/geo'
+import { geoDistM, randomGeoPoint } from '@/lib/game/geo'
 import {
   BOT_NAMES, BOT_SHOOT_RANGE_M, BOT_SHOOT_COOLDOWN_MS,
   type BotDifficulty,
@@ -46,16 +46,9 @@ export async function spawnBots(params: {
 
   const supabase = createServerClient()
 
-  // ── ボットの初期 GPS 位置をフィールド内にランダム散布 ──────────────────────
+  // ── ボットの初期 GPS 位置をフィールド内にランダム散布（0.3〜0.8倍の距離に配置） ──
   function randomNear(lat: number, lng: number, r: number) {
-    const angle      = Math.random() * 2 * Math.PI
-    const d          = r * 0.3 + Math.random() * r * 0.5  // 0.3〜0.8倍の距離に配置
-    const mPerDegLat = 111_320
-    const mPerDegLng = 111_320 * Math.cos(lat * Math.PI / 180)
-    return {
-      lat: lat + (d * Math.cos(angle)) / mPerDegLat,
-      lng: lng + (d * Math.sin(angle)) / mPerDegLng,
-    }
+    return randomGeoPoint(lat, lng, r, 0.3)
   }
 
   // ── モード別の行動パターンと役割を決定 ────────────────────────────────────

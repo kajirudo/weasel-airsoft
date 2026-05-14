@@ -55,12 +55,10 @@ import { attackNPC, claimController } from '@/lib/game/npcActions'
 import { isHostPlayer } from '@/lib/game/utils'
 import { compositeKillcam }      from '@/lib/game/killcam-capture'
 import { createClient }          from '@/lib/supabase/client'
-import { MAX_HP, HIT_DAMAGE, STICKY_GRACE_MS, AUTO_FIRE_HOLD_MS, SCORE_COMMIT_MS, INVESTIGATE_RADIUS_M, HUNTING_CONTROLLER_TTL_MS, BOT_SHOOT_RANGE_M } from '@/lib/game/constants'
+import { MAX_HP, HIT_DAMAGE, STICKY_GRACE_MS, AUTO_FIRE_HOLD_MS, SCORE_COMMIT_MS, BOT_SHOOT_RANGE_M, DEFAULT_SHOOT_COOLDOWN, CAPTURE_RADIUS_M } from '@/lib/game/constants'
 import { geoDistM } from '@/lib/game/geo'
 import type { DetectedQR, LocalPlayerSession } from '@/types/game'
 import type { Player, QrCodeId, MarkerMode, GameMode, PlayerRole2 } from '@/types/database'
-
-const DEFAULT_SHOOT_COOLDOWN = 800
 
 export default function GamePage() {
   const { gameId } = useParams<{ gameId: string }>()
@@ -348,16 +346,11 @@ export default function GamePage() {
     if (!geoPos || !selfPlayer || game?.game_mode !== 'traitor') {
       return { nearestCrewDist: null as number | null, nearestCrewId: null as string | null }
     }
-    const mPerDegLat = 111_320
-    const mPerDegLng = 111_320 * Math.cos(geoPos.lat * Math.PI / 180)
     let minDist = Infinity
     let minId: string | null = null
     for (const p of players) {
       if (p.id === selfPlayer.id || !p.is_alive || p.lat == null || p.lng == null) continue
-      const d = Math.sqrt(
-        ((p.lat - geoPos.lat) * mPerDegLat) ** 2 +
-        ((p.lng - geoPos.lng) * mPerDegLng) ** 2,
-      )
+      const d = geoDistM(geoPos, p as { lat: number; lng: number })
       if (d < minDist) { minDist = d; minId = p.id }
     }
     return {
@@ -372,16 +365,10 @@ export default function GamePage() {
     ...nearbyObjectives,
     controlPoints: nearbyObjectives.controlPoints.map(cp => {
       if (!geoPos || selfTeam === 'none') return cp
-      const mPerDegLat = 111_320
-      const mPerDegLng = 111_320 * Math.cos(geoPos.lat * Math.PI / 180)
       const count = players.filter(p => {
         if (!p.is_alive || p.team !== selfTeam) return false
         if (p.lat == null || p.lng == null) return false
-        const d = Math.sqrt(
-          ((p.lat - cp.lat) * mPerDegLat) ** 2 +
-          ((p.lng - cp.lng) * mPerDegLng) ** 2,
-        )
-        return d <= 10  // CAPTURE_RADIUS_M
+        return geoDistM(p as { lat: number; lng: number }, cp) <= CAPTURE_RADIUS_M
       }).length
       return { ...cp, nearbyTeamCount: Math.max(1, count) }
     }),

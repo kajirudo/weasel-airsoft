@@ -25,6 +25,8 @@ export const ARUCO_ID_TO_QR: Record<number, QrCodeId> = {
 
 export const MAX_HP = 100
 export const HIT_DAMAGE = 25
+/** デフォルト射撃クールダウン（ms）。DB から上書きされる。 */
+export const DEFAULT_SHOOT_COOLDOWN = 800
 export const MAX_PLAYERS = 6
 export const RETICLE_RADIUS = 80
 
