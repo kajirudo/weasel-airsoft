@@ -245,7 +245,11 @@ function useShootingReload(params: {
   const triggeredRef = useRef<string | null>(null)
   useEffect(() => {
     if (!enabled || !playerId || !deviceId) return
-    if (ammo > 0)     return
+    if (ammo > 0) {
+      // 弾が補充されたらキーをリセット（次回 ammo==0 で確実に再トリガーできるよう）
+      triggeredRef.current = null
+      return
+    }
     if (isReloading)  return
     // 同じ「ammo==0」状態で何度も発火しないようキーで一意化
     const key = `${playerId}:${reloadUntilMs}`

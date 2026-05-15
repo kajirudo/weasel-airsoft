@@ -234,7 +234,8 @@ CREATE OR REPLACE FUNCTION public.trigger_shooting_reload(
 ) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE
-  v_player record;
+  v_player       record;
+  v_reload_until timestamptz;
 BEGIN
   SELECT id, device_id, shooting_reload_until INTO v_player
     FROM public.players WHERE id = p_player_id FOR UPDATE;
@@ -246,10 +247,11 @@ BEGIN
     RETURN jsonb_build_object('skipped', true,
       'reload_until', v_player.shooting_reload_until);
   END IF;
+  v_reload_until := now() + (p_reload_ms * interval '1 millisecond');
   UPDATE public.players
-     SET shooting_reload_until = now() + (p_reload_ms * interval '1 millisecond')
+     SET shooting_reload_until = v_reload_until
    WHERE id = p_player_id;
-  RETURN jsonb_build_object('reload_until', now() + (p_reload_ms * interval '1 millisecond'));
+  RETURN jsonb_build_object('reload_until', v_reload_until);
 END $$;
 
 CREATE OR REPLACE FUNCTION public.finish_shooting_reload(

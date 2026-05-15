@@ -440,7 +440,7 @@ export default function GamePage() {
 
   // ── シューティングモード射撃 ────────────────────────────────────────────
   const shootingRef = useRef(shooting)
-  shootingRef.current = shooting
+  useEffect(() => { shootingRef.current = shooting }, [shooting])
 
   const handleShootingTrigger = useCallback(async () => {
     if (!session || !isShootingMode) return
