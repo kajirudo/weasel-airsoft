@@ -11,7 +11,7 @@
 
 import { createServerClient } from '@/lib/supabase/server'
 import {
-  SHOOTING_INDOOR, SHOOTING_OUTDOOR, shootingEnvConfig,
+  SHOOTING_OUTDOOR, shootingEnvConfig,
 } from '@/lib/game/constants'
 import type { ShootingEnvironment, ShootingTargetKind } from '@/types/database'
 
@@ -195,7 +195,3 @@ export async function commitShootingScore(params: { gameId: string }): Promise<v
   await supabase.rpc('commit_shooting_score', { p_game_id: params.gameId })
 }
 
-// 環境別 hit 角度を返すヘルパ（クライアントが Reticle 表示判定に使う）
-export async function getShootingEnvHitAngle(environment: ShootingEnvironment): Promise<number> {
-  return environment === 'indoor' ? SHOOTING_INDOOR.hitAngleDeg : SHOOTING_OUTDOOR.hitAngleDeg
-}

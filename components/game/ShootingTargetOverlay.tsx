@@ -49,8 +49,9 @@ export function ShootingTargetOverlay({
         const relAngle = normAngle(curBear - geoPos.heading)
 
         const cfg     = SHOOTING_TARGET_KINDS[t.kind]
-        const lifeMs  = expiresAt - now
-        const lifePct = Math.max(0, lifeMs / (expiresAt - new Date(t.spawn_at).getTime()))
+        const lifeMs      = expiresAt - now
+        const totalLifeMs = Math.max(1, expiresAt - new Date(t.spawn_at).getTime())
+        const lifePct     = Math.max(0, lifeMs / totalLifeMs)
 
         // FOV 外 → 画面端インジケーター
         if (Math.abs(relAngle) > halfFov) {
