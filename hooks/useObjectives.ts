@@ -120,7 +120,7 @@ export function useObjectives({
       supabase.removeChannel(channel)
       channelRef.current = null
     }
-  }, [enabled, gameId])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enabled, gameId])
 
   // ── 距離計算 + 近接判定 ───────────────────────────────────────────────────────
   const objectivesWithDist: ObjectiveWithDist[] = objectives.map(obj => ({

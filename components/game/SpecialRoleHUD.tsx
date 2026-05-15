@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import type { Player } from '@/types/database'
-import { SABOTAGE_DURATION_MS, INVESTIGATE_RADIUS_M } from '@/lib/game/constants'
+import { INVESTIGATE_RADIUS_M } from '@/lib/game/constants'
 
 interface Props {
   selfPlayer:         Player | undefined
@@ -32,7 +32,6 @@ export function SpecialRoleHUD({
     <div className="fixed bottom-32 right-4 z-[70] flex flex-col gap-2 items-end">
       {role2 === 'traitor' && (
         <TraitorButtons
-          selfPlayer={selfPlayer}
           sabotageUntil={sabotageUntil}
           onSabotage={onSabotage}
         />
@@ -53,34 +52,28 @@ export function SpecialRoleHUD({
 // ── Traitor ボタン ────────────────────────────────────────────────────────────
 
 function TraitorButtons({
-  selfPlayer, sabotageUntil, onSabotage,
+  sabotageUntil, onSabotage,
 }: {
-  selfPlayer:    Player
   sabotageUntil: string | null
   onSabotage:    () => Promise<void>
 }) {
   const [loading, setLoading] = useState(false)
   const [localCooldownUntil, setLocalCooldownUntil] = useState<number | null>(null)
-
-  // グローバルサボタージュ継続中 or ローカルクールダウン中
-  const sabotageActive = sabotageUntil ? new Date(sabotageUntil).getTime() > Date.now() : false
-  const onCooldown     = localCooldownUntil ? localCooldownUntil > Date.now() : false
-  const disabled       = sabotageActive || onCooldown || loading
-
-  const [cooldownPct, setCooldownPct] = useState(0)
-  const rafRef = useRef<number>(0)
+  const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
-    if (!localCooldownUntil) { setCooldownPct(0); return }
-    const animate = () => {
-      const remaining = localCooldownUntil - Date.now()
-      if (remaining <= 0) { setCooldownPct(0); return }
-      setCooldownPct(Math.min(100, (1 - remaining / SABOTAGE_COOLDOWN_MS) * 100))
-      rafRef.current = requestAnimationFrame(animate)
-    }
-    rafRef.current = requestAnimationFrame(animate)
-    return () => cancelAnimationFrame(rafRef.current)
-  }, [localCooldownUntil])
+    const id = setInterval(() => setNow(Date.now()), 200)
+    return () => clearInterval(id)
+  }, [])
+
+  // グローバルサボタージュ継続中 or ローカルクールダウン中
+  const sabotageActive = sabotageUntil ? new Date(sabotageUntil).getTime() > now : false
+  const onCooldown     = localCooldownUntil ? localCooldownUntil > now : false
+  const disabled       = sabotageActive || onCooldown || loading
+
+  const cooldownPct = localCooldownUntil
+    ? Math.min(100, Math.max(0, (1 - (localCooldownUntil - now) / SABOTAGE_COOLDOWN_MS) * 100))
+    : 0
 
   const handleSabotage = async () => {
     if (disabled) return

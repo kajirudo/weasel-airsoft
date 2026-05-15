@@ -3,19 +3,11 @@
 import { useEffect, useRef, useState } from 'react'
 import type { RealtimePostgresChangesPayload, REALTIME_SUBSCRIBE_STATES } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
+import { toRealtimeStatus }  from '@/hooks/realtimeStatus'
+import type { RealtimeStatus } from '@/hooks/realtimeStatus'
 import type { Player } from '@/types/database'
 
-export type RealtimeStatus = 'connecting' | 'connected' | 'reconnecting' | 'error'
-
-function toRealtimeStatus(raw: string): RealtimeStatus {
-  switch (raw) {
-    case 'SUBSCRIBED':    return 'connected'
-    case 'CHANNEL_ERROR': return 'error'
-    case 'TIMED_OUT':
-    case 'CLOSED':        return 'reconnecting'
-    default:              return 'connecting'
-  }
-}
+export type { RealtimeStatus } from '@/hooks/realtimeStatus'
 
 function sortByJoinedAt(players: Player[]): Player[] {
   return [...players].sort((a, b) => a.joined_at.localeCompare(b.joined_at))

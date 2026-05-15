@@ -1,5 +1,6 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import type { GameNpc } from '@/types/database'
 
 interface Props {
@@ -15,11 +16,18 @@ function hpColor(pct: number): string {
 
 /** ゲーム画面上部中央に表示する NPC HP バー */
 export function NPCStatus({ npc, visible }: Props) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!visible) return
+    const id = setInterval(() => setNow(Date.now()), 500)
+    return () => clearInterval(id)
+  }, [visible])
+
   if (!visible) return null
 
   const pct        = npc.hp / npc.max_hp
-  const isStunned  = !!(npc.stun_until    && new Date(npc.stun_until).getTime()    > Date.now())
-  const isConfused = !!(npc.confused_until && new Date(npc.confused_until).getTime() > Date.now())
+  const isStunned  = !!(npc.stun_until    && new Date(npc.stun_until).getTime()    > now)
+  const isConfused = !!(npc.confused_until && new Date(npc.confused_until).getTime() > now)
 
   return (
     <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[65] pointer-events-none">

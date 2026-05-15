@@ -1,5 +1,8 @@
-import type { QrCodeId, MarkerMode, GameMode, BotBehavior } from '@/types/database'
-export type { MarkerMode, GameMode, BotBehavior }
+import type {
+  QrCodeId, MarkerMode, GameMode, BotBehavior,
+  ShootingEnvironment, ShootingTargetKind,
+} from '@/types/database'
+export type { MarkerMode, GameMode, BotBehavior, ShootingEnvironment, ShootingTargetKind }
 
 // ── マーカーモード ────────────────────────────────────────────────────────────
 export const MARKER_MODE_KEY     = 'weasel_marker_mode'
@@ -25,6 +28,8 @@ export const ARUCO_ID_TO_QR: Record<number, QrCodeId> = {
 
 export const MAX_HP = 100
 export const HIT_DAMAGE = 25
+/** デフォルト射撃クールダウン（ms）。DB から上書きされる。 */
+export const DEFAULT_SHOOT_COOLDOWN = 800
 export const MAX_PLAYERS = 6
 export const RETICLE_RADIUS = 80
 
@@ -56,6 +61,7 @@ export const GAME_MODE_LABELS: Record<GameMode, string> = {
   tactics:  '🏴 タクティクス（拠点争奪）',
   traitor:  '🕵️ スパイ（スパイを探せ）',
   hunting:  '👹 ハンティング（NPC討伐）',
+  shooting: '🎯 シューティング（その場で撃ち抜け）',
 }
 
 // ── Traitor モード ─────────────────────────────────────────────────────────
@@ -196,4 +202,88 @@ export const BOT_DIFFICULTY_LABELS: Record<BotDifficulty, string> = {
   easy:   '😊 かんたん',
   normal: '😐 ふつう',
   hard:   '😈 むずかしい',
+}
+
+// ── シューティングモード ──────────────────────────────────────────────────────
+/** スポーン管理ループ間隔（ms） */
+export const SHOOTING_TICK_MS = 250
+
+/** Indoor: クイックショット体験 */
+export const SHOOTING_INDOOR = {
+  minRangeM:        1.5,
+  maxRangeM:        5,
+  spawnIntervalMs:  1500,
+  targetLifetimeMs: 4000,
+  maxActive:        4,
+  travelMs:         0,
+  hitAngleDeg:      8,        // レティクル中心からの許容角度（広め＝クイック）
+  comboBonus:       25,
+  missPenalty:      -20,
+  expirePenalty:    -10,
+  magSize:          12,
+  reloadMs:         1200,
+  distanceBonus:    0,        // Indoor は距離ボーナスなし
+} as const
+
+/** Outdoor: スナイパー体験 */
+export const SHOOTING_OUTDOOR = {
+  minRangeM:        10,
+  maxRangeM:        40,
+  spawnIntervalMs:  3500,
+  targetLifetimeMs: 8000,
+  maxActive:        3,
+  travelMs:         450,
+  hitAngleDeg:      3,
+  comboBonus:       40,
+  missPenalty:      -10,
+  expirePenalty:    -5,
+  magSize:          6,         // ボルトアクション風
+  reloadMs:         2200,
+  distanceBonus:    5,         // (dist_m - minRange) * 5 点
+} as const
+
+/** ターゲット種別ごとの特性。クライアント側でランダム抽選するが
+ *  最終値はサーバー側 `spawn_shooting_target` RPC が再計算（改ざん防止）。 */
+export const SHOOTING_TARGET_KINDS: Record<ShootingTargetKind, {
+  weight:      number   // 重み付きランダム
+  baseScore:   number
+  hp:          number
+  sizeMul:     number
+  lifetimeMul: number
+  driftDps:    number
+  label:       string
+  emoji:       string
+  color:       string
+}> = {
+  standard: { weight: 60, baseScore:  100, hp: 1, sizeMul: 1.0,  lifetimeMul: 1.0, driftDps:  0,
+              label: 'STD',   emoji: '🎯', color: '#fafafa' },
+  tough:    { weight: 15, baseScore:  300, hp: 3, sizeMul: 1.2,  lifetimeMul: 1.5, driftDps:  0,
+              label: 'TOUGH', emoji: '🛡',  color: '#94a3b8' },
+  tiny:     { weight: 12, baseScore:  400, hp: 1, sizeMul: 0.45, lifetimeMul: 0.9, driftDps:  0,
+              label: 'TINY',  emoji: '🔻', color: '#22d3ee' },
+  runner:   { weight: 10, baseScore:  250, hp: 1, sizeMul: 0.9,  lifetimeMul: 1.2, driftDps: 35,
+              label: 'RUN',   emoji: '💨', color: '#a3e635' },
+  bonus:    { weight:  3, baseScore: 1000, hp: 1, sizeMul: 0.6,  lifetimeMul: 0.7, driftDps: 60,
+              label: 'BONUS', emoji: '⭐', color: '#fbbf24' },
+}
+
+export const SHOOTING_DURATION_MIN_DEFAULT      = 3
+export const SHOOTING_GPS_ACC_INDOOR_HINT_M     = 30   // accuracy 超過で Indoor 推奨
+export const SHOOTING_DEFAULT_FOV_DEG           = 60   // AR 投影 FOV
+
+/** 環境ごとの定数まとめて取得 */
+export function shootingEnvConfig(env: ShootingEnvironment) {
+  return env === 'indoor' ? SHOOTING_INDOOR : SHOOTING_OUTDOOR
+}
+
+/** 重み付き kind 抽選 */
+export function pickShootingKind(): ShootingTargetKind {
+  const entries = Object.entries(SHOOTING_TARGET_KINDS) as [ShootingTargetKind, { weight: number }][]
+  const total   = entries.reduce((s, [, v]) => s + v.weight, 0)
+  let   roll    = Math.random() * total
+  for (const [k, v] of entries) {
+    roll -= v.weight
+    if (roll <= 0) return k
+  }
+  return 'standard'
 }

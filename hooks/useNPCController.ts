@@ -11,13 +11,13 @@
 
 import { useEffect, useRef, useCallback } from 'react'
 import type { Player, GameNpc } from '@/types/database'
-import type { GeoPosition }     from '@/hooks/useRadar'
 import type { LocalPlayerSession } from '@/types/game'
 import {
   HUNTING_MOVE_INTERVAL_MS, HUNTING_LOCKON_RANGE_M,
   HUNTING_OFFLINE_THRESHOLD_MS,
 } from '@/lib/game/constants'
 import { geoDistM, bearingDeg } from '@/hooks/useNPC'
+import { mPerDegree } from '@/lib/game/geo'
 import {
   moveNPC, clearLockon, armLunge, fireLunge, cancelLunge, npcCatch, heartbeat,
 } from '@/lib/game/npcActions'
@@ -84,13 +84,15 @@ export function useNPCController({ gameId, session, npc, players, isController, 
     // 5. NPC の現在位置チェック
     if (n.lat == null || n.lng == null) return
 
-    // 6. ロックオン候補：10m 圏内・生存・GPS あり・オフラインでない
-    const aliveWithPos = ps.filter(p => {
-      if (!p.is_alive) return false
-      if (p.lat == null || p.lng == null) return false
-      if (!p.last_seen) return false
-      if (now - new Date(p.last_seen).getTime() > HUNTING_OFFLINE_THRESHOLD_MS) return false
-      return true
+    // 6a. GPS あり生存プレイヤー（移動ターゲット用・last_seen 不問）
+    const aliveWithGPS = ps.filter(p =>
+      p.is_alive && p.lat != null && p.lng != null && !p.is_bot
+    )
+
+    // 6b. ロックオン候補：加えてオフライン除外（heartbeat 未着の場合は last_seen なしも許容）
+    const aliveWithPos = aliveWithGPS.filter(p => {
+      if (!p.last_seen) return true   // heartbeat 未到着の場合は許容（ゲーム開始直後）
+      return now - new Date(p.last_seen).getTime() <= HUNTING_OFFLINE_THRESHOLD_MS
     })
 
     const candidates = aliveWithPos
@@ -147,7 +149,7 @@ export function useNPCController({ gameId, session, npc, players, isController, 
     }
 
     // 9. 移動（ターゲットへ向かう。いなければ最近接プレイヤーへ）
-    const moveTo = newTarget?.p ?? aliveWithPos
+    const moveTo = newTarget?.p ?? aliveWithGPS
       .map(p => ({ p, dist: geoDistM({ lat: n.lat!, lng: n.lng! }, { lat: p.lat!, lng: p.lng! }) }))
       .sort((a, b) => a.dist - b.dist)[0]?.p ?? null
 
@@ -161,11 +163,9 @@ export function useNPCController({ gameId, session, npc, players, isController, 
     const heading   = bearingDeg({ lat: n.lat, lng: n.lng }, { lat: targetLat, lng: targetLng })
     const dtSec     = HUNTING_MOVE_INTERVAL_MS / 1000
     const stepM     = n.speed_mps * dtSec
-
-    const mPerDegLat = 111_320
-    const mPerDegLng = 111_320 * Math.cos(n.lat * Math.PI / 180)
-    const newLat = n.lat + (stepM * Math.cos(heading * Math.PI / 180)) / mPerDegLat
-    const newLng = n.lng + (stepM * Math.sin(heading * Math.PI / 180)) / mPerDegLng
+    const mpd       = mPerDegree(n.lat)
+    const newLat = n.lat + (stepM * Math.cos(heading * Math.PI / 180)) / mpd.lat
+    const newLng = n.lng + (stepM * Math.sin(heading * Math.PI / 180)) / mpd.lng
 
     await moveNPC({
       gameId, controllerId,

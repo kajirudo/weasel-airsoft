@@ -4,18 +4,9 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { RealtimePostgresChangesPayload, REALTIME_SUBSCRIBE_STATES } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
+import { toRealtimeStatus } from '@/hooks/realtimeStatus'
 import type { Game } from '@/types/database'
-import type { RealtimeStatus } from './usePlayerRealtime'
-
-function toRealtimeStatus(raw: string): RealtimeStatus {
-  switch (raw) {
-    case 'SUBSCRIBED':    return 'connected'
-    case 'CHANNEL_ERROR': return 'error'
-    case 'TIMED_OUT':
-    case 'CLOSED':        return 'reconnecting'
-    default:              return 'connecting'
-  }
-}
+import type { RealtimeStatus } from '@/hooks/realtimeStatus'
 
 export function useGameRealtime(gameId: string) {
   const [game, setGame] = useState<Game | null>(null)

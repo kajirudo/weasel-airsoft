@@ -25,7 +25,7 @@ export function useHeartbeat({ gameId, playerId, deviceId, gameStatus }: UseHear
     const supabase = createClient()
 
     async function beat() {
-      const { gameId, playerId, deviceId, gameStatus } = paramsRef.current
+      const { playerId, deviceId, gameStatus } = paramsRef.current
       if (!playerId || !deviceId) return
       // ロビー中もハートビートを送ることで、ゲーム開始直後からタイムアウト判定が安定する
       if (gameStatus === 'finished') return
