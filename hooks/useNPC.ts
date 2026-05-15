@@ -7,7 +7,7 @@
  * canAttack / isBehind は背後攻撃ボタンの表示制御に使う。
  */
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createClient }  from '@/lib/supabase/client'
 import type { GameNpc }  from '@/types/database'
 import type { GeoPosition } from '@/hooks/useRadar'

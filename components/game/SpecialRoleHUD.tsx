@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import type { Player } from '@/types/database'
-import { SABOTAGE_DURATION_MS, INVESTIGATE_RADIUS_M } from '@/lib/game/constants'
+import { INVESTIGATE_RADIUS_M } from '@/lib/game/constants'
 
 interface Props {
   selfPlayer:         Player | undefined
@@ -32,7 +32,6 @@ export function SpecialRoleHUD({
     <div className="fixed bottom-32 right-4 z-[70] flex flex-col gap-2 items-end">
       {role2 === 'traitor' && (
         <TraitorButtons
-          selfPlayer={selfPlayer}
           sabotageUntil={sabotageUntil}
           onSabotage={onSabotage}
         />
@@ -53,9 +52,8 @@ export function SpecialRoleHUD({
 // ── Traitor ボタン ────────────────────────────────────────────────────────────
 
 function TraitorButtons({
-  selfPlayer, sabotageUntil, onSabotage,
+  sabotageUntil, onSabotage,
 }: {
-  selfPlayer:    Player
   sabotageUntil: string | null
   onSabotage:    () => Promise<void>
 }) {

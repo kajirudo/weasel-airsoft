@@ -8,7 +8,7 @@
  *  - callMeeting:        device_id + meeting_uses でスロット確認
  *  - submitVote:         device_id + is_alive で確認
  *  - resolveMeeting:     device_id + host 確認（期限チェック）
- *  - useSabotage:        device_id + role2 = 'traitor' で確認
+ *  - triggerSabotage:    device_id + role2 = 'traitor' で確認
  *  - investigatePlayer:  device_id + role2 = 'sheriff' + GPS 近接
  *  - completeMission:    RPC でアトミックに実行
  */
@@ -228,7 +228,7 @@ async function resolveMeetingInternal(
 }
 
 /** Traitor の妨害（Comms Sabotage: 全員のレーダーを20秒間無効化） */
-export async function useSabotage(params: {
+export async function triggerSabotage(params: {
   gameId:   string
   playerId: string
   deviceId: string

@@ -1,6 +1,6 @@
 'use client'
 
-import type { Player, QrCodeId, Team } from '@/types/database'
+import type { Player, Team } from '@/types/database'
 import { MAX_HP, QR_LABELS } from '@/lib/game/constants'
 
 const TEAM_LABEL: Record<Team, string> = { none: '', red: '🔴', blue: '🔵' }

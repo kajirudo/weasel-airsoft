@@ -154,7 +154,7 @@ export async function startGame(params: {
   }
 
   // ── Traitor モード: role2 をランダム割り当て ──────────────────────────
-  let traitorTaskGoal = 0
+  const traitorTaskGoal = 0
   if (gameMode === 'traitor') {
     const { data: allPlayers } = await supabase
       .from('players').select('id').eq('game_id', gameId)
@@ -449,6 +449,11 @@ export async function completeGenerator(params: {
 }): Promise<{ allActivated: boolean }> {
   const { objectiveId, playerId, deviceId, gameId } = params
   const supabase = createServerClient()
+
+  // 他アクション（beginGenerator 等）と同様に device_id でプレイヤーを検証
+  const { data: player } = await supabase.from('players')
+    .select('id, is_alive').eq('id', playerId).eq('device_id', deviceId).single()
+  if (!player) throw new Error('プレイヤーが見つかりません')
 
   const { data: obj } = await supabase.from('game_objectives')
     .select('*').eq('id', objectiveId).eq('game_id', gameId).single()

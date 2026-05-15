@@ -11,7 +11,6 @@
 
 import { useEffect, useRef, useCallback } from 'react'
 import type { Player, GameNpc } from '@/types/database'
-import type { GeoPosition }     from '@/hooks/useRadar'
 import type { LocalPlayerSession } from '@/types/game'
 import {
   HUNTING_MOVE_INTERVAL_MS, HUNTING_LOCKON_RANGE_M,

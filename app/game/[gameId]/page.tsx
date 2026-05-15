@@ -51,7 +51,7 @@ import {
   registerHit, startGame, finishGameByTimeout, saveKillcamUrl, commitTacticsScore,
 } from '@/lib/game/actions'
 import {
-  getMyRole, callMeeting, submitVote, resolveMeeting, useSabotage, investigatePlayer,
+  getMyRole, callMeeting, submitVote, resolveMeeting, triggerSabotage, investigatePlayer,
 } from '@/lib/game/traitorActions'
 import { playerShootBot } from '@/lib/game/botActions'
 import { attackNPC, claimController } from '@/lib/game/npcActions'
@@ -141,7 +141,7 @@ export default function GamePage() {
 
   // HP変化コールバック
   const handleHpChange = useCallback(
-    (playerId: string, _newHp: number, _oldHp: number) => {
+    (playerId: string) => {
       if (session && playerId === session.playerId) { triggerFlash(); playHit() }
     },
     [session, triggerFlash, playHit]
@@ -226,7 +226,6 @@ export default function GamePage() {
     return () => {
       if (tacticsCommitRef.current) clearInterval(tacticsCommitRef.current)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game?.status, game?.game_mode, gameId])
 
   // カウントダウン
@@ -770,7 +769,6 @@ export default function GamePage() {
           cooldownLeft={npcState.cooldownLeft}
           isStunned={npcState.isStunned}
           npcHp={npcState.npc.hp}
-          npcMaxHp={npcState.npc.max_hp}
           onAttack={async () => {
             if (!session || !npcState.npc) return
             await attackNPC({
@@ -858,7 +856,7 @@ export default function GamePage() {
           }
           onSabotage={async () => {
             if (!session) return
-            await useSabotage({ gameId, playerId: session.playerId, deviceId: session.deviceId })
+            await triggerSabotage({ gameId, playerId: session.playerId, deviceId: session.deviceId })
           }}
           onInvestigate={async (targetId: string) => {
             if (!session) return { role2: 'crew' as PlayerRole2 }

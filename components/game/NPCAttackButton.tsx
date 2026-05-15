@@ -14,12 +14,11 @@ interface Props {
   cooldownLeft: number    // 残秒（0 = 攻撃可能）
   isStunned:    boolean   // NPC スタン中は視覚的に示す
   npcHp:        number
-  npcMaxHp:     number
   onAttack:     () => Promise<void>
 }
 
 export function NPCAttackButton({
-  canAttack, isBehind, cooldownLeft, isStunned, npcHp, npcMaxHp, onAttack,
+  canAttack, isBehind, cooldownLeft, isStunned, npcHp, onAttack,
 }: Props) {
   const [loading, setLoading] = useState(false)
 

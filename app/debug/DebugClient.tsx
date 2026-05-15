@@ -17,7 +17,7 @@ import { useGameRealtime }   from '@/hooks/useGameRealtime'
 import { useHeartbeat }      from '@/hooks/useHeartbeat'
 import { MAX_HP, QR_LABELS }  from '@/lib/game/constants'
 import type { LocalPlayerSession } from '@/types/game'
-import type { Player, QrCodeId }  from '@/types/database'
+import type { Player }  from '@/types/database'
 
 // ─── ユーティリティ ────────────────────────────────────────────────────────────
 function getOrCreateDeviceId(): string {
@@ -146,7 +146,6 @@ export function DebugClient() {
   }
 
   const selfPlayer = players.find((p) => p.id === session?.playerId)
-  const opponents  = players.filter((p) => p.id !== session?.playerId && p.is_alive)
   const isHost     = players.length > 0 && players[0].id === session?.playerId
 
   // ─── UI ──────────────────────────────────────────────────────────────────────

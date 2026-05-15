@@ -39,7 +39,7 @@ export async function spawnBots(params: {
   playerTeam?:  Team
 }): Promise<void> {
   const {
-    gameId, gameMode, botCount, difficulty,
+    gameId, gameMode, botCount,
     fieldCenterLat, fieldCenterLng, fieldRadiusM,
   } = params
   if (botCount <= 0) return
