@@ -34,24 +34,34 @@ interface AREntity {
 }
 
 interface Props {
-  geoPos:        GeoPosition
+  geoPos:           GeoPosition
   /** ハンティングモード NPC */
-  npc?:          GameNpc | null
-  npcIsLunging?: boolean
+  npc?:             GameNpc | null
+  /** ランジ予告中（lunge_fire_at > now） */
+  npcIsLunging?:    boolean
+  /** スタン中（stun_until > now） */
+  npcIsStunned?:    boolean
+  /** 混乱中（confused_until > now） */
+  npcIsConfused?:   boolean
+  /** NPC が自分をロックオン中 */
+  npcIsLockedOn?:   boolean
   /** ソロプレイ ボット一覧 */
-  bots?:         Player[]
+  bots?:            Player[]
   /** ボット攻撃射程（m） */
-  botRangeM?:    number
+  botRangeM?:       number
   /** ボットスプライトをタップしたときのコールバック */
-  onBotTap?:     (botId: string) => void
+  onBotTap?:        (botId: string) => void
   /** ボット攻撃クールダウン中は true */
-  botDisabled?:  boolean
+  botDisabled?:     boolean
 }
 
 export function AREntityOverlay({
   geoPos,
   npc,
-  npcIsLunging = false,
+  npcIsLunging  = false,
+  npcIsStunned  = false,
+  npcIsConfused = false,
+  npcIsLockedOn = false,
   bots          = [],
   botRangeM     = 15,
   onBotTap,
@@ -94,6 +104,37 @@ export function AREntityOverlay({
 
   return (
     <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
+
+      {/* ── アニメーション keyframes ─────────────────────────────────────────── */}
+      <style>{`
+        /* ランジ（突進）: NPCが下へ突っ込み、大きくなって戻る */
+        @keyframes ar-lunge {
+          0%   { transform: scale(1) translateY(0px);   opacity: 1; }
+          30%  { transform: scale(1.4) translateY(20px); opacity: 1; }
+          65%  { transform: scale(2.2) translateY(60px); opacity: 0.85; }
+          80%  { transform: scale(2.5) translateY(75px); opacity: 0.6; }
+          100% { transform: scale(1) translateY(0px);   opacity: 1; }
+        }
+        /* スタン: ぐらぐら左右に揺れる */
+        @keyframes ar-stun {
+          0%,100% { transform: rotate(-12deg) translateY(0px); }
+          25%     { transform: rotate(12deg)  translateY(-4px); }
+          50%     { transform: rotate(-8deg)  translateY(2px); }
+          75%     { transform: rotate(8deg)   translateY(-2px); }
+        }
+        /* 混乱: ゆっくりふわふわ漂う */
+        @keyframes ar-confused {
+          0%,100% { transform: translateY(0px) rotate(-4deg); }
+          33%     { transform: translateY(-10px) rotate(4deg); }
+          66%     { transform: translateY(5px) rotate(-2deg); }
+        }
+        /* ロックオン: 赤い脈動リング */
+        @keyframes ar-lockon-ring {
+          0%,100% { transform: scale(1);    opacity: 0.9; }
+          50%     { transform: scale(1.25); opacity: 0.4; }
+        }
+      `}</style>
+
       {entities.map(entity => {
         if (Math.abs(entity.relAngle) > halfFov) return null
 
@@ -102,6 +143,15 @@ export function AREntityOverlay({
         const hpPct  = (entity.hp / entity.maxHp) * 100
         const canTap = entity.type === 'bot' && entity.inRange && !botDisabled
         const dimmed = entity.type === 'bot' && !entity.inRange
+
+        // NPC の状態別アニメーションクラス
+        const isNpc = entity.type === 'npc'
+        const spriteAnimation: React.CSSProperties = isNpc
+          ? npcIsStunned  ? { animation: 'ar-stun 0.45s ease-in-out infinite',    filter: 'grayscale(0.8) brightness(0.6)' }
+          : npcIsLunging  ? { animation: 'ar-lunge 1.1s ease-in-out infinite' }
+          : npcIsConfused ? { animation: 'ar-confused 1.8s ease-in-out infinite', filter: 'hue-rotate(120deg)' }
+          : {}
+          : {}
 
         return (
           <div
@@ -113,39 +163,61 @@ export function AREntityOverlay({
               transform:    `translate(-50%, -50%) scale(${scale})`,
               pointerEvents: canTap ? 'auto' : 'none',
               opacity:       dimmed ? 0.45 : 1,
-              transition:    'opacity 0.3s',
+              transition:    'opacity 0.3s, left 0.15s',
             }}
             onPointerDown={canTap ? () => onBotTap?.(entity.id) : undefined}
           >
-            {/*
-              ─── スプライト ──────────────────────────────────────────────────
-              絵文字を以下のいずれかに差し替えるだけで対応可能:
+            <div className="flex flex-col items-center select-none relative">
 
-              【静止画】
-                <img
-                  src="/images/npc.png"
-                  className="w-16 h-24 object-contain drop-shadow-[0_2px_12px_rgba(0,0,0,0.9)]"
-                  alt=""
+              {/* ── ロックオン脈動リング（NPC が自分をロックオン中） ──────────── */}
+              {isNpc && npcIsLockedOn && !npcIsStunned && (
+                <div
+                  className="absolute rounded-full border-[3px] border-red-500"
+                  style={{
+                    inset:     '-12px',
+                    animation: 'ar-lockon-ring 0.7s ease-in-out infinite',
+                  }}
                 />
+              )}
 
-              【3D モデル（例: @react-three/fiber）】
-                <Canvas style={{ width: 80, height: 120 }}>
-                  <Suspense fallback={null}>
-                    <NPCModel />
-                  </Suspense>
-                </Canvas>
-              ────────────────────────────────────────────────────────────────
-            */}
-            <div className="flex flex-col items-center select-none">
+              {/*
+                ─── スプライト ────────────────────────────────────────────────
+                絵文字を以下のいずれかに差し替えるだけで対応可能:
+
+                【静止画】
+                  <img
+                    src="/images/npc.png"
+                    className="w-16 h-24 object-contain drop-shadow-[0_2px_12px_rgba(0,0,0,0.9)]"
+                    alt=""
+                    style={spriteAnimation}
+                  />
+
+                【3D モデル（例: @react-three/fiber）】
+                  <Canvas style={{ width: 80, height: 120, ...spriteAnimation }}>
+                    <Suspense fallback={null}><NPCModel /></Suspense>
+                  </Canvas>
+                ──────────────────────────────────────────────────────────────
+              */}
               <span
-                style={{ fontSize: entity.type === 'npc' ? '64px' : '48px', lineHeight: 1 }}
-                className={[
-                  'drop-shadow-[0_2px_10px_rgba(0,0,0,0.95)]',
-                  npcIsLunging && entity.type === 'npc' ? 'animate-pulse' : '',
-                ].join(' ')}
+                style={{
+                  fontSize:   isNpc ? '64px' : '48px',
+                  lineHeight: 1,
+                  ...spriteAnimation,
+                }}
+                className="drop-shadow-[0_2px_10px_rgba(0,0,0,0.95)]"
               >
-                {entity.type === 'npc' ? '👹' : '🤖'}
+                {isNpc ? '👹' : '🤖'}
               </span>
+
+              {/* スタン中の星マーク */}
+              {isNpc && npcIsStunned && (
+                <span
+                  className="absolute -top-4 text-xl"
+                  style={{ animation: 'ar-confused 1.2s ease-in-out infinite' }}
+                >
+                  ⭐
+                </span>
+              )}
 
               {/* HP バー */}
               <div className="w-14 h-1.5 bg-black/70 rounded-full overflow-hidden mt-1 shadow-lg">
@@ -163,12 +235,25 @@ export function AREntityOverlay({
                 {entity.distM.toFixed(0)}m{entity.name ? ` · ${entity.name}` : ''}
               </p>
 
+              {/* NPC 状態ラベル */}
+              {isNpc && (npcIsStunned || npcIsConfused || npcIsLunging) && (
+                <span className={[
+                  'text-[10px] font-black mt-0.5 drop-shadow-[0_1px_3px_rgba(0,0,0,1)]',
+                  npcIsStunned  ? 'text-yellow-300' :
+                  npcIsLunging  ? 'text-red-400 animate-pulse' :
+                                  'text-blue-300',
+                ].join(' ')}>
+                  {npcIsStunned ? 'STUN' : npcIsLunging ? '！突進！' : '混乱中'}
+                </span>
+              )}
+
               {/* ボット射程内: タップ誘導 */}
               {entity.type === 'bot' && entity.inRange && !botDisabled && (
                 <span className="text-[10px] text-red-400 font-black mt-0.5 animate-pulse drop-shadow-[0_1px_3px_rgba(0,0,0,1)]">
                   タップ攻撃
                 </span>
               )}
+
             </div>
           </div>
         )

@@ -700,6 +700,7 @@ export default function GamePage() {
           objectives={objectives}
           storm={storm}
           game={game}
+          npc={isHuntingMode ? npcState.npc : undefined}
         />
       )}
 
@@ -786,6 +787,9 @@ export default function GamePage() {
           geoPos={geoPos}
           npc={npcState.npc}
           npcIsLunging={npcState.isLungeArming}
+          npcIsStunned={npcState.isStunned}
+          npcIsConfused={npcState.isConfused}
+          npcIsLockedOn={npcState.isBeingLockedOn}
         />
       )}
 
