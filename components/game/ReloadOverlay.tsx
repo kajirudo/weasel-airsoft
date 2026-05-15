@@ -1,7 +1,8 @@
 'use client'
 
 /**
- * ReloadOverlay — 画面下部にリロード中の演出を表示
+ * ReloadOverlay — リロード中を示す画面下端バー。
+ * 表示面積を最小限にして視界を塞がないようにする。
  */
 
 interface Props {
@@ -13,17 +14,19 @@ export function ReloadOverlay({ visible, progress }: Props) {
   if (!visible) return null
 
   return (
-    <div className="absolute bottom-28 left-0 right-0 flex justify-center pointer-events-none z-[63]">
-      <div className="bg-black/80 border border-amber-600/50 rounded-xl px-5 py-2 flex flex-col items-center gap-1.5 min-w-[180px]">
-        <p className="text-amber-300 text-xs font-bold tracking-widest animate-pulse">
+    <div className="fixed bottom-0 left-0 right-0 z-[70] pointer-events-none">
+      {/* ラベル */}
+      <div className="flex justify-center mb-0.5">
+        <span className="text-[9px] font-bold text-amber-400/80 tracking-widest">
           ⟳ RELOADING
-        </p>
-        <div className="w-full h-1.5 bg-gray-800 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-amber-500 rounded-full"
-            style={{ width: `${progress * 100}%`, transition: 'width 0.1s linear' }}
-          />
-        </div>
+        </span>
+      </div>
+      {/* プログレスバー（3px 細め） */}
+      <div className="h-[3px] bg-gray-800/80 w-full">
+        <div
+          className="h-full bg-amber-500"
+          style={{ width: `${progress * 100}%`, transition: 'width 0.1s linear' }}
+        />
       </div>
     </div>
   )

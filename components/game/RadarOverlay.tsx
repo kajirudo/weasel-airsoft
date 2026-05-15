@@ -48,6 +48,8 @@ interface RadarOverlayProps {
   game?:        Game | null
   /** ハンティングモード: NPC 位置 */
   npc?:         GameNpc | null
+  /** マップの表示位置。デフォルトは右下 */
+  position?:    'top-left' | 'bottom-right'
 }
 
 export const RadarOverlay = memo(function RadarOverlay({
@@ -59,6 +61,7 @@ export const RadarOverlay = memo(function RadarOverlay({
   storm,
   game,
   npc,
+  position = 'bottom-right',
 }: RadarOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -292,7 +295,7 @@ export const RadarOverlay = memo(function RadarOverlay({
       ref={canvasRef}
       width={CANVAS_SIZE}
       height={CANVAS_SIZE}
-      className="fixed top-4 left-4 z-[60] pointer-events-none"
+      className={`fixed z-[60] pointer-events-none ${position === 'top-left' ? 'top-4 left-4' : 'bottom-20 right-4'}`}
       aria-hidden="true"
     />
   )

@@ -1,13 +1,10 @@
 'use client'
 
 /**
- * ShootingHUD — シューティングモードの上部 HUD。
+ * ShootingHUD — シューティングモードのミニ HUD（左上コーナー）
  *
- * 表示:
- *   - スコア（大型）
- *   - コンボ・最大コンボ
- *   - 残弾ドット + リロード進捗
- *   - 環境バッジ
+ * 画面中央を塞がないよう最小面積に抑える。
+ * タップ射撃を妨げないよう pointer-events-none。
  */
 
 import type { ShootingEnvironment } from '@/types/database'
@@ -20,81 +17,65 @@ interface Props {
   ammo:           number
   magSize:        number
   isReloading:    boolean
-  reloadProgress: number   // 0..1
   targetsActive:  number
-  onManualReload: () => void
 }
 
 export function ShootingHUD({
   environment, score, combo, maxCombo,
-  ammo, magSize, isReloading, reloadProgress,
-  targetsActive, onManualReload,
+  ammo, magSize, isReloading, targetsActive,
 }: Props) {
+  const envLabel = environment === 'indoor' ? '🏠 INDOOR' : '🌲 OUT'
+  const envColor = environment === 'indoor'
+    ? 'bg-orange-900/60 border-orange-600 text-orange-300'
+    : 'bg-blue-900/60 border-blue-600 text-blue-300'
+
   return (
-    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[65] pointer-events-none">
-      <div className="bg-black/75 backdrop-blur-sm rounded-xl px-4 py-2 flex flex-col items-center gap-1 min-w-[220px]">
-        {/* 環境バッジ + アクティブ数 */}
-        <div className="flex items-center gap-2 w-full justify-between">
-          <span className={[
-            'text-[10px] font-bold px-2 py-0.5 rounded-full border',
-            environment === 'indoor'
-              ? 'bg-orange-900/50 border-orange-600 text-orange-300'
-              : 'bg-blue-900/50 border-blue-600 text-blue-300',
-          ].join(' ')}>
-            {environment === 'indoor' ? '🏠 INDOOR' : '🌲 OUTDOOR'}
-          </span>
-          <span className="text-gray-400 text-[10px] font-mono">
-            TGT {targetsActive}
-          </span>
-        </div>
-
-        {/* スコア */}
-        <p className="text-amber-300 text-2xl font-black font-mono tabular-nums leading-none">
-          {score.toLocaleString()}
-        </p>
-
-        {/* コンボ */}
-        <div className="flex items-center gap-2 text-[10px]">
-          <span className={combo >= 3 ? 'text-red-400 font-bold animate-pulse' : 'text-gray-400'}>
-            COMBO ×{combo}
-          </span>
-          <span className="text-gray-600">/ MAX ×{maxCombo}</span>
-        </div>
-
-        {/* 弾倉表示 */}
-        <button
-          onClick={onManualReload}
-          disabled={isReloading || ammo >= magSize}
-          className="pointer-events-auto mt-1 w-full flex flex-col items-center gap-1 disabled:opacity-100"
-        >
-          {/* 弾ドット */}
-          <div className="flex gap-0.5">
-            {Array.from({ length: magSize }).map((_, i) => (
-              <span
-                key={i}
-                className={[
-                  'block w-1.5 h-3 rounded-sm transition-all',
-                  i < ammo ? 'bg-amber-400 shadow-[0_0_3px_rgba(251,191,36,0.6)]' : 'bg-gray-700',
-                ].join(' ')}
-              />
-            ))}
-          </div>
-
-          {/* リロード中のプログレスバー */}
-          {isReloading ? (
-            <div className="w-full h-1 bg-gray-700 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-amber-500 transition-all duration-100"
-                style={{ width: `${reloadProgress * 100}%` }}
-              />
-            </div>
-          ) : (
-            <span className="text-[9px] text-gray-500 font-mono">
-              {ammo >= magSize ? 'FULL' : 'TAP TO RELOAD'}
-            </span>
-          )}
-        </button>
+    <div className="fixed top-4 left-4 z-[65] pointer-events-none flex flex-col gap-1.5">
+      {/* 環境バッジ + ターゲット数 */}
+      <div className="flex items-center gap-1.5">
+        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${envColor}`}>
+          {envLabel}
+        </span>
+        <span className="text-gray-400 text-[9px] font-mono bg-black/50 px-1.5 py-0.5 rounded-full">
+          TGT {targetsActive}
+        </span>
       </div>
+
+      {/* スコア */}
+      <p className="text-amber-300 text-xl font-black font-mono tabular-nums leading-none drop-shadow-[0_1px_4px_rgba(0,0,0,1)]">
+        {score.toLocaleString()}
+      </p>
+
+      {/* コンボ */}
+      {combo >= 2 && (
+        <p className={`text-[10px] font-bold leading-none ${combo >= 5 ? 'text-red-400 animate-pulse' : 'text-yellow-400'}`}>
+          ×{combo} COMBO
+        </p>
+      )}
+
+      {/* 弾倉ドット */}
+      <div className="flex gap-0.5 flex-wrap max-w-[80px]">
+        {Array.from({ length: magSize }).map((_, i) => (
+          <span
+            key={i}
+            className={[
+              'block w-1.5 h-2.5 rounded-sm',
+              isReloading
+                ? 'bg-amber-600/40'
+                : i < ammo
+                  ? 'bg-amber-400 shadow-[0_0_2px_rgba(251,191,36,0.5)]'
+                  : 'bg-gray-700',
+            ].join(' ')}
+          />
+        ))}
+      </div>
+
+      {/* MAX コンボ */}
+      {maxCombo > 0 && (
+        <p className="text-[8px] text-gray-500 font-mono leading-none">
+          BEST ×{maxCombo}
+        </p>
+      )}
     </div>
   )
 }

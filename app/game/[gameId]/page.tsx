@@ -798,6 +798,7 @@ export default function GamePage() {
           storm={storm}
           game={game}
           npc={isHuntingMode ? npcState.npc : undefined}
+          position={isShootingMode ? 'bottom-right' : 'top-left'}
         />
       )}
 
@@ -900,9 +901,7 @@ export default function GamePage() {
             ammo={shooting.ammo}
             magSize={shooting.magSize}
             isReloading={shooting.isReloading}
-            reloadProgress={shooting.reloadProgress}
             targetsActive={shooting.targets.length}
-            onManualReload={shooting.manualReload}
           />
           <ShootingTargetOverlay
             geoPos={geoPos}
@@ -913,6 +912,44 @@ export default function GamePage() {
           />
           <ShootingScoreFeed feedRef={scoreFeedRef} />
           <ReloadOverlay visible={shooting.isReloading} progress={shooting.reloadProgress} />
+
+          {/* 射撃ボタン（画面下部中央）+ リロードボタン */}
+          <div className="fixed bottom-6 left-0 right-0 z-[66] flex items-end justify-center gap-6 pointer-events-none">
+            {/* マニュアルリロード */}
+            <button
+              className={[
+                'pointer-events-auto w-14 h-14 rounded-full flex items-center justify-center',
+                'bg-black/60 border border-gray-600 active:scale-95 transition-transform',
+                (shooting.isReloading || shooting.ammo >= shooting.magSize)
+                  ? 'opacity-30'
+                  : 'opacity-80',
+              ].join(' ')}
+              onPointerDown={(e) => { e.stopPropagation(); shooting.manualReload() }}
+              aria-label="リロード"
+            >
+              <span className="text-2xl">⟳</span>
+            </button>
+
+            {/* 射撃ボタン */}
+            <button
+              className={[
+                'pointer-events-auto w-24 h-24 rounded-full flex items-center justify-center',
+                'border-2 active:scale-95 transition-transform',
+                shooting.isReloading || shooting.ammo <= 0
+                  ? 'bg-gray-900/60 border-gray-700 opacity-40'
+                  : shooting.aimed
+                    ? 'bg-red-900/70 border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.5)]'
+                    : 'bg-black/60 border-white/30',
+              ].join(' ')}
+              onPointerDown={(e) => { e.stopPropagation(); handleShootingTrigger() }}
+              aria-label="射撃"
+            >
+              <span className="text-4xl">🔫</span>
+            </button>
+
+            {/* 右側スペーサー（対称レイアウト用） */}
+            <div className="w-14 h-14" />
+          </div>
         </>
       )}
 
