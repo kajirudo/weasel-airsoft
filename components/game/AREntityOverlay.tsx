@@ -84,12 +84,11 @@ export function AREntityOverlay({
   const entities = useMemo<AREntity[]>(() => {
     const result: AREntity[] = []
     if (npc?.lat != null && npc?.lng != null && npc.hp > 0) {
-      const distM = geoDistM(geoPos, { lat: npc.lat, lng: npc.lng })
-      if (distM <= MAX_VISIBLE_M) {
-        const bearing  = bearingDeg(geoPos, { lat: npc.lat, lng: npc.lng })
-        const relAngle = ((bearing - geoPos.heading) + 540) % 360 - 180
-        result.push({ id: 'npc', hp: npc.hp, maxHp: npc.max_hp, distM, relAngle, type: 'npc', inRange: false })
-      }
+      const distM    = geoDistM(geoPos, { lat: npc.lat, lng: npc.lng })
+      const bearing  = bearingDeg(geoPos, { lat: npc.lat, lng: npc.lng })
+      const relAngle = ((bearing - geoPos.heading) + 540) % 360 - 180
+      // 距離上限なし: FOV外でもインジケーター表示のためエンティティには常に追加
+      result.push({ id: 'npc', hp: npc.hp, maxHp: npc.max_hp, distM, relAngle, type: 'npc', inRange: false })
     }
     for (const bot of bots) {
       if (!bot.is_alive || bot.lat == null || bot.lng == null) continue
@@ -143,7 +142,31 @@ export function AREntityOverlay({
   return (
     <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
       {entities.map(entity => {
+        // NPC が FOV 外 → 画面端にインジケーター表示
+        if (Math.abs(entity.relAngle) > halfFov && entity.type === 'npc') {
+          const isRight = entity.relAngle > 0
+          return (
+            <div
+              key="npc-indicator"
+              className="absolute top-1/2 -translate-y-1/2 flex flex-col items-center pointer-events-none"
+              style={{ [isRight ? 'right' : 'left']: '10px' }}
+            >
+              <span className="text-red-500 text-2xl drop-shadow-[0_0_6px_rgba(0,0,0,1)]">
+                {isRight ? '▶' : '◀'}
+              </span>
+              <span className="text-xl drop-shadow-[0_0_6px_rgba(0,0,0,1)]">👹</span>
+              <span className="text-white text-[10px] font-bold drop-shadow-[0_1px_4px_rgba(0,0,0,1)]">
+                {entity.distM.toFixed(0)}m
+              </span>
+            </div>
+          )
+        }
+
+        // ボットが FOV 外 → 非表示
         if (Math.abs(entity.relAngle) > halfFov) return null
+
+        // NPC が MAX_VISIBLE_M 超でも表示（遠くても存在を示す）
+        if (entity.type !== 'npc' && entity.distM > MAX_VISIBLE_M) return null
 
         // 水平位置: FOV 内の比例配置
         const xPct = 50 + (entity.relAngle / halfFov) * 50

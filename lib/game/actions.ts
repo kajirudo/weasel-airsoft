@@ -4,7 +4,7 @@ import { createServerClient } from '@/lib/supabase/server'
 import { QR_CODE_IDS, SCORE_SECS_PER_POINT, STORM_DAMAGE_HP, CAPTURE_RADIUS_M } from '@/lib/game/constants'
 import { geoDistM, randomGeoPoint } from '@/lib/game/geo'
 import { spawnBots } from '@/lib/game/botActions'
-import type { QrCodeId, MarkerMode, GameMode, Team } from '@/types/database'
+import type { QrCodeId, MarkerMode, GameMode, Team, ShootingEnvironment } from '@/types/database'
 import type { BotDifficulty } from '@/lib/game/constants'
 
 /** minDistM 以上の間隔を保って count 個の GPS 点を散布する */
@@ -123,6 +123,10 @@ export async function startGame(params: {
   botCount?:        number
   /** ソロプレイ: ボット難易度 */
   botDifficulty?:   BotDifficulty
+  /** シューティング: 環境 */
+  shootingEnvironment?: ShootingEnvironment
+  /** シューティング: 同時最大ターゲット数 */
+  shootingMaxActive?:   number
 }): Promise<void> {
   const {
     gameId, hitDamage, shootCooldown, durationMinutes,
@@ -202,6 +206,9 @@ export async function startGame(params: {
     traitor_count:    params.traitorCount   ?? 1,
     sheriff_enabled:  params.sheriffEnabled ?? false,
     task_goal:        traitorTaskGoal,
+    // シューティング
+    shooting_environment: gameMode === 'shooting' ? (params.shootingEnvironment ?? 'outdoor') : null,
+    shooting_max_active:  params.shootingMaxActive ?? 3,
   }).eq('id', gameId).eq('status', 'lobby')
   if (error) throw new Error('ゲーム開始に失敗しました')
 
@@ -230,6 +237,15 @@ export async function startGame(params: {
     const playerCount = players?.length ?? 1
     const { initNPC } = await import('@/lib/game/npcActions')
     await initNPC({ gameId, lat: fieldCenterLat, lng: fieldCenterLng, playerCount })
+  }
+
+  // ── シューティングモード: base 位置 + 弾倉を初期化 ───────────────────────────
+  if (gameMode === 'shooting') {
+    const { initShootingMode } = await import('@/lib/game/shootingActions')
+    await initShootingMode({
+      gameId,
+      environment: params.shootingEnvironment ?? 'outdoor',
+    })
   }
 
   // ── ソロプレイ: ボットをスポーン ─────────────────────────────────────────────

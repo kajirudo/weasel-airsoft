@@ -4,7 +4,9 @@ export type QrCodeId     =
   | 'bot_1'    | 'bot_2'    | 'bot_3'    | 'bot_4'    | 'bot_5'    | 'bot_6'    | 'bot_7' | 'bot_8'
 export type Team         = 'none' | 'red' | 'blue'
 export type MarkerMode   = 'qr' | 'aruco'
-export type GameMode     = 'battle' | 'survival' | 'tactics' | 'traitor' | 'hunting'
+export type GameMode     = 'battle' | 'survival' | 'tactics' | 'traitor' | 'hunting' | 'shooting'
+export type ShootingEnvironment = 'indoor' | 'outdoor'
+export type ShootingTargetKind  = 'standard' | 'tough' | 'tiny' | 'runner' | 'bonus'
 export type PlayerRole   = 'survivor' | 'hunter'
 export type PlayerRole2  = 'crew' | 'traitor' | 'sheriff'
 export type ObjectiveType = 'medkit' | 'damage_boost' | 'generator' | 'control_point' | 'seal'
@@ -46,6 +48,9 @@ export interface Game {
   meeting_until:    string | null   // 集会終了 ISO 文字列
   sabotage_type:    SabotageType | null
   sabotage_until:   string | null
+  // シューティングモード
+  shooting_environment: ShootingEnvironment | null
+  shooting_max_active:  number
 }
 
 export interface Player {
@@ -79,6 +84,15 @@ export interface Player {
   // ソロプレイ用ボット
   is_bot:        boolean
   bot_behavior:  BotBehavior | null
+  // シューティングモード
+  shooting_score:        number
+  shooting_combo:        number
+  shooting_max_combo:    number
+  shooting_misses:       number
+  shooting_ammo:         number
+  shooting_reload_until: string | null
+  base_lat:              number | null
+  base_lng:              number | null
 }
 
 export interface TraitorVote {
@@ -136,4 +150,24 @@ export interface GameNpc {
   confused_until:       string | null
   controller_id:        string | null
   controller_heartbeat: string | null
+}
+
+/** シューティングモード ターゲット */
+export interface ShootingTarget {
+  id:              string
+  game_id:         string
+  owner_player_id: string
+  kind:            ShootingTargetKind
+  bearing_deg:     number
+  dist_m:          number
+  drift_dps:       number
+  size_factor:     number
+  hp:              number
+  max_hp:          number
+  base_score:      number
+  spawn_at:        string
+  expires_at:      string
+  killed_at:       string | null
+  killed_by:       string | null
+  travel_ms:       number
 }

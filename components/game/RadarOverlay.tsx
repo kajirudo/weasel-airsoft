@@ -250,9 +250,12 @@ export const RadarOverlay = memo(function RadarOverlay({
       ctx.restore()  // clip 解除
     }
 
-    // ── 自分（中央の白三角）────────────────────────────────────────────────
+    // ── 自分（中央の白三角、heading 方向を向く）────────────────────────────
     ctx.save()
     ctx.translate(cx, cy)
+    if (geoPos) {
+      ctx.rotate((geoPos.heading * Math.PI) / 180)
+    }
     ctx.beginPath()
     ctx.moveTo(0, -9)
     ctx.lineTo(6, 7)

@@ -1,6 +1,6 @@
 'use client'
 
-import type { MarkerMode, GameMode, BotDifficulty } from '@/lib/game/constants'
+import type { MarkerMode, GameMode, BotDifficulty, ShootingEnvironment } from '@/lib/game/constants'
 import {
   GAME_MODE_LABELS,
   HUNTING_SOLO_HP, HUNTING_SOLO_SPEED, HUNTING_SOLO_LOCKON,
@@ -9,6 +9,7 @@ import {
   HUNTING_BACKSTAB_RANGE_M, HUNTING_BACKSTAB_ANGLE,
   HUNTING_ATTACK_COOLDOWN_MS,
   BOT_DIFFICULTY_LABELS, BOT_SHOOT_RANGE_M,
+  SHOOTING_INDOOR, SHOOTING_OUTDOOR,
 } from '@/lib/game/constants'
 
 export interface GameSettingsValues {
@@ -28,12 +29,17 @@ export interface GameSettingsValues {
   soloMode:        boolean
   botCount:        number
   botDifficulty:   BotDifficulty
+  // シューティング
+  shootingEnvironment: ShootingEnvironment
+  shootingMaxActive:   number
 }
 
 interface GameSettingsProps extends GameSettingsValues {
   onChange:      (settings: GameSettingsValues) => void
   /** ロビーにいる実プレイヤー数（ソロ判定の参考表示用） */
   playerCount?:  number
+  /** GPS 精度（m）— シューティングモードの Indoor 推奨判定に使う */
+  gpsAccuracyM?: number | null
 }
 
 function SliderField({
@@ -71,7 +77,8 @@ export function GameSettings({
   gameMode, stormRadiusM, stormFinalM, fieldRadiusM,
   traitorCount, sheriffEnabled,
   soloMode, botCount, botDifficulty,
-  playerCount,
+  shootingEnvironment, shootingMaxActive,
+  playerCount, gpsAccuracyM,
   onChange,
 }: GameSettingsProps) {
   const set = (partial: Partial<GameSettingsValues>) =>
@@ -80,14 +87,15 @@ export function GameSettings({
       gameMode, stormRadiusM, stormFinalM, fieldRadiusM,
       traitorCount, sheriffEnabled,
       soloMode, botCount, botDifficulty,
+      shootingEnvironment, shootingMaxActive,
       ...partial,
     })
 
   function handleGameModeChange(mode: GameMode) {
     // タクティクスはチームモード強制オン、Traitor はチームモード無効
     const newTeamMode = mode === 'tactics' ? true : mode === 'traitor' ? false : teamMode
-    // hunting はソロモード無効（既に NPC が存在するため）
-    const newSolo = mode === 'hunting' ? false : soloMode
+    // hunting / shooting はソロモード無効（NPC / 固定ターゲットで完結）
+    const newSolo = (mode === 'hunting' || mode === 'shooting') ? false : soloMode
     set({ gameMode: mode, teamMode: newTeamMode, soloMode: newSolo })
   }
 
@@ -120,8 +128,76 @@ export function GameSettings({
           {gameMode === 'tactics'  && '3拠点をチームで奪い合う。時間終了時に拠点得点が多い方が勝利。'}
           {gameMode === 'traitor'  && '中に潜むスパイを投票で追放せよ。タスク完了か全員追放で Crew 勝利。'}
           {gameMode === 'hunting'  && 'プレイヤー全員 vs NPC（鬼）。背後攻撃でHPをゼロにするか、封印ポイントに近づいてホールドで全解除すると勝利。捕まったら脱落。'}
+          {gameMode === 'shooting' && 'その場固定でターゲットを撃ち抜くスコア競争。Indoor は近距離・Outdoor は遠距離。リロード・連続撃破コンボあり。'}
         </p>
       </div>
+
+      {/* ── シューティングモード専用設定 ──────────────────────────────────── */}
+      {gameMode === 'shooting' && (
+        <div className="space-y-3 border border-amber-900/50 rounded-lg p-3 bg-amber-900/10">
+          <p className="text-amber-400 text-xs font-semibold">🎯 シューティング 設定</p>
+
+          {/* Indoor / Outdoor */}
+          <div>
+            <p className="text-gray-400 text-xs mb-1.5">環境</p>
+            <div className="flex gap-2">
+              {([
+                { v: 'indoor'  as const, label: '🏠 INDOOR',  desc: '1.5〜5m' },
+                { v: 'outdoor' as const, label: '🌲 OUTDOOR', desc: '10〜40m' },
+              ]).map(o => (
+                <button
+                  key={o.v}
+                  onClick={() => set({ shootingEnvironment: o.v })}
+                  className={[
+                    'flex-1 py-2 rounded-lg text-xs font-bold border transition-all',
+                    shootingEnvironment === o.v
+                      ? 'bg-amber-600/30 border-amber-500 text-amber-300'
+                      : 'bg-gray-800 border-gray-700 text-gray-500',
+                  ].join(' ')}
+                >
+                  <div>{o.label}</div>
+                  <div className="text-[10px] opacity-70">{o.desc}</div>
+                </button>
+              ))}
+            </div>
+            {/* GPS 精度が低ければ Indoor を推奨 */}
+            {gpsAccuracyM != null && gpsAccuracyM > 30 && shootingEnvironment === 'outdoor' && (
+              <p className="text-orange-400 text-[11px] mt-1.5 leading-snug">
+                ⚠ GPS 精度が低い ({Math.round(gpsAccuracyM)}m) — Indoor 推奨
+              </p>
+            )}
+          </div>
+
+          {/* パラメータ表示 */}
+          <div className="grid grid-cols-2 gap-2 text-[10px]">
+            <div className="bg-gray-800/60 rounded-lg p-2 space-y-0.5">
+              <p className="text-orange-400 font-bold">🏠 INDOOR</p>
+              <p className="text-gray-400">距離 {SHOOTING_INDOOR.minRangeM}〜{SHOOTING_INDOOR.maxRangeM}m</p>
+              <p className="text-gray-400">弾倉 {SHOOTING_INDOOR.magSize}発</p>
+              <p className="text-gray-400">リロード {SHOOTING_INDOOR.reloadMs / 1000}s</p>
+              <p className="text-gray-400">判定 ±{SHOOTING_INDOOR.hitAngleDeg}°</p>
+            </div>
+            <div className="bg-gray-800/60 rounded-lg p-2 space-y-0.5">
+              <p className="text-blue-400 font-bold">🌲 OUTDOOR</p>
+              <p className="text-gray-400">距離 {SHOOTING_OUTDOOR.minRangeM}〜{SHOOTING_OUTDOOR.maxRangeM}m</p>
+              <p className="text-gray-400">弾倉 {SHOOTING_OUTDOOR.magSize}発</p>
+              <p className="text-gray-400">リロード {SHOOTING_OUTDOOR.reloadMs / 1000}s</p>
+              <p className="text-gray-400">判定 ±{SHOOTING_OUTDOOR.hitAngleDeg}°</p>
+            </div>
+          </div>
+
+          <SliderField
+            label="同時最大ターゲット数" value={shootingMaxActive} min={1} max={6} step={1}
+            displayValue={`${shootingMaxActive}体`}
+            onChange={(v) => set({ shootingMaxActive: v })}
+          />
+          <p className="text-gray-600 text-xs leading-snug">
+            ターゲット種別: STD(60%) / TOUGH(15%) / TINY(12%) / RUN(10%) / BONUS(3%)
+            <br />
+            ボーナス ⭐ は超高得点 (+1000)。タフ 🛡 は3発必要。タイニー 🔻 は判定シビア。
+          </p>
+        </div>
+      )}
 
       {/* ── ハンティングモード専用設定 ────────────────────────────────────── */}
       {gameMode === 'hunting' && (
@@ -243,7 +319,7 @@ export function GameSettings({
       )}
 
       {/* ── ソロプレイ ───────────────────────────────────────────────────────── */}
-      {gameMode !== 'hunting' && (
+      {gameMode !== 'hunting' && gameMode !== 'shooting' && (
         <div className="space-y-3 border border-cyan-900/50 rounded-lg p-3 bg-cyan-900/10">
           <label className="flex items-center justify-between cursor-pointer select-none">
             <div>

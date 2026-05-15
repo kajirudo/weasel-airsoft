@@ -26,6 +26,11 @@ import { NPCAlert }              from '@/components/game/NPCAlert'
 import { NPCLungeWarning }       from '@/components/game/NPCLungeWarning'
 import { NPCAttackButton }       from '@/components/game/NPCAttackButton'
 import { AREntityOverlay }       from '@/components/game/AREntityOverlay'
+import { ShootingHUD }           from '@/components/game/ShootingHUD'
+import { ShootingTargetOverlay } from '@/components/game/ShootingTargetOverlay'
+import { ShootingScoreFeed }     from '@/components/game/ShootingScoreFeed'
+import type { ShootingScoreFeedHandle } from '@/components/game/ShootingScoreFeed'
+import { ReloadOverlay }         from '@/components/game/ReloadOverlay'
 import { Button }                from '@/components/ui/Button'
 import { ShareGameId }           from '@/components/lobby/ShareGameId'
 import { GameSettings, type GameSettingsValues } from '@/components/lobby/GameSettings'
@@ -47,6 +52,7 @@ import { useNPC }                from '@/hooks/useNPC'
 import { useNPCController }      from '@/hooks/useNPCController'
 import { useNPCVibration }       from '@/hooks/useNPCVibration'
 import { useBotController }      from '@/hooks/useBotController'
+import { useShootingMode }       from '@/hooks/useShootingMode'
 import {
   registerHit, startGame, finishGameByTimeout, saveKillcamUrl, commitTacticsScore,
 } from '@/lib/game/actions'
@@ -55,13 +61,16 @@ import {
 } from '@/lib/game/traitorActions'
 import { playerShootBot } from '@/lib/game/botActions'
 import { attackNPC, claimController } from '@/lib/game/npcActions'
+import {
+  registerShootingHit, registerShootingMiss,
+} from '@/lib/game/shootingActions'
 import { isHostPlayer } from '@/lib/game/utils'
 import { compositeKillcam }      from '@/lib/game/killcam-capture'
 import { createClient }          from '@/lib/supabase/client'
 import { MAX_HP, HIT_DAMAGE, STICKY_GRACE_MS, AUTO_FIRE_HOLD_MS, SCORE_COMMIT_MS, BOT_SHOOT_RANGE_M, DEFAULT_SHOOT_COOLDOWN, CAPTURE_RADIUS_M } from '@/lib/game/constants'
 import { geoDistM } from '@/lib/game/geo'
 import type { DetectedQR, LocalPlayerSession } from '@/types/game'
-import type { Player, QrCodeId, MarkerMode, GameMode, PlayerRole2 } from '@/types/database'
+import type { Player, QrCodeId, MarkerMode, GameMode, PlayerRole2, ShootingEnvironment } from '@/types/database'
 
 export default function GamePage() {
   const { gameId } = useParams<{ gameId: string }>()
@@ -86,6 +95,8 @@ export default function GamePage() {
     soloMode:        false,
     botCount:        3,
     botDifficulty:   'normal' as import('@/lib/game/constants').BotDifficulty,
+    shootingEnvironment: 'outdoor' as ShootingEnvironment,
+    shootingMaxActive:   3,
   })
 
   // ゲームレコードから markerMode を初期化（game が読み込まれた時点で同期）
@@ -154,7 +165,8 @@ export default function GamePage() {
   // ゲームフェーズ・モード判定（フック呼び出しより前に宣言が必要）
   const isLobby    = game?.status === 'lobby'
   const isActive   = game?.status === 'active'
-  const isHuntingMode = game?.game_mode === 'hunting'
+  const isHuntingMode  = game?.game_mode === 'hunting'
+  const isShootingMode = game?.game_mode === 'shooting'
 
   // playersRef を最新状態に同期（captureKillcamRef 内で stale closure を避けるため）
   useEffect(() => { playersRef.current = players }, [players])
@@ -293,6 +305,19 @@ export default function GamePage() {
     enabled:      isActive && isHuntingMode,
   })
 
+  // ── シューティング: ターゲット管理 ────────────────────────────────────────
+  const shootingEnv: ShootingEnvironment = (game?.shooting_environment ?? 'outdoor') as ShootingEnvironment
+  const shooting = useShootingMode({
+    gameId:      isShootingMode ? gameId : null,
+    playerId:    session?.playerId ?? null,
+    deviceId:    session?.deviceId ?? null,
+    selfPlayer,
+    geoPos,
+    environment: shootingEnv,
+    enabled:     isActive && isShootingMode && (selfPlayer?.is_alive ?? true),
+  })
+  const scoreFeedRef = useRef<ShootingScoreFeedHandle | null>(null)
+
   // コントローラー引き継ぎ: heartbeat TTL 切れを検知したら claim を試みる
   useEffect(() => {
     if (!isActive || !isHuntingMode || !session) return
@@ -306,6 +331,17 @@ export default function GamePage() {
   const bots         = players.filter(p => p.is_bot)
   const humanPlayers = players.filter(p => !p.is_bot)
   const isSoloMode   = bots.length > 0 && isActive
+
+  // ソロプレイ: 人間プレイヤー全員死亡でゲーム終了（ホストのみ実行）
+  useEffect(() => {
+    if (!isSoloMode || !isActive || !isHostRef.current) return
+    if (humanPlayers.length === 0) return
+    const allHumansDead = humanPlayers.every(p => !p.is_alive)
+    if (allHumansDead) {
+      finishGameByTimeout({ gameId }).catch(() => {})
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [humanPlayers, isSoloMode, isActive, gameId])
 
   useBotController({
     gameId,
@@ -402,6 +438,55 @@ export default function GamePage() {
     return () => clearTimeout(id)
   }, [game?.sabotage_type, game?.sabotage_until])
 
+  // ── シューティングモード射撃 ────────────────────────────────────────────
+  const shootingRef = useRef(shooting)
+  shootingRef.current = shooting
+
+  const handleShootingTrigger = useCallback(async () => {
+    if (!session || !isShootingMode) return
+    if (isOffline || cdBlock) return
+    const s = shootingRef.current
+    if (s.isReloading) return
+    if (s.ammo <= 0) {
+      // 自動でリロードがかかるが、即時フィードバックとして空撃ち音を抑制
+      return
+    }
+
+    if (s.aimed) {
+      const target = s.aimed
+      const fireAt = target.travelMs > 0
+        ? new Promise<void>(r => setTimeout(r, target.travelMs))
+        : Promise.resolve()
+      await fireAt
+      try {
+        const result = await registerShootingHit({
+          gameId,
+          playerId:    session.playerId,
+          deviceId:    session.deviceId,
+          targetId:    target.id,
+          environment: shootingEnv,
+        })
+        if (result.killed && result.score && result.kind) {
+          scoreFeedRef.current?.push(result.score, result.kind, result.combo ?? 0)
+          result.kind === 'bonus' ? playKill() : playShot()
+        } else if (!result.error) {
+          // tough を傷つけたが未撃破
+          playHit()
+        }
+      } catch { /* ignore */ }
+    } else {
+      // 空撃ち: 弾消費 + コンボリセット
+      try {
+        await registerShootingMiss({
+          playerId:    session.playerId,
+          deviceId:    session.deviceId,
+          environment: shootingEnv,
+        })
+      } catch { /* ignore */ }
+      playShot()
+    }
+  }, [session, isShootingMode, isOffline, cdBlock, gameId, shootingEnv, playShot, playHit, playKill])
+
   // ── 射撃コア（ID指定） ────────────────────────────────────────────────────
   const shootTarget = useCallback(async (targetQrCodeId: QrCodeId) => {
     if (!session) return
@@ -432,18 +517,20 @@ export default function GamePage() {
     } catch { /* 無視 */ }
   }, [session, gameId, shootCooldown, isOffline, cdBlock, game?.status, playShot, playKill])
 
-  // マニュアル射撃（タップ）— レティクル内に QR が映っているときのみ
+  // マニュアル射撃（タップ）— シューティングモードでは QR 不要
   const handleShoot = useCallback(async () => {
+    if (isShootingMode) { await handleShootingTrigger(); return }
     if (!detectedQR?.isInReticle) return
     await shootTarget(detectedQR.qrCodeId)
-  }, [detectedQR, shootTarget])
+  }, [isShootingMode, handleShootingTrigger, detectedQR, shootTarget])
 
-  // スティッキー射撃（オートファイア / BT トリガー用）— lastTargetQRIdRef が有効なら射撃
+  // スティッキー射撃（オートファイア / BT トリガー用）— shootingMode では常時発火許可
   const handleShootSticky = useCallback(async () => {
+    if (isShootingMode) { await handleShootingTrigger(); return }
     const qrId = lastTargetQRIdRef.current
     if (!qrId) return
     await shootTarget(qrId)
-  }, [shootTarget])
+  }, [isShootingMode, handleShootingTrigger, shootTarget])
 
   // handleShootRef を最新の handleShootSticky に同期
   useEffect(() => { handleShootRef.current = handleShootSticky }, [handleShootSticky])
@@ -524,14 +611,16 @@ export default function GamePage() {
   }, [detectedQR?.isInReticle, detectedQR?.qrCodeId])
 
   // ── オートファイア ────────────────────────────────────────────────────────
+  // 通常モードは QR sticky 検知中のみ。シューティングモードは「エイム合致時」に発火。
+  const shootingAutoReady = isShootingMode && !!shooting.aimed && !shooting.isReloading && shooting.ammo > 0
   useEffect(() => {
-    if (!autoFireEnabled || !stickyInReticle) return
-    // AUTO_FIRE_HOLD_MS ごとに射撃を試みる（実際の発射はクールダウンで制御）
+    if (!autoFireEnabled) return
+    if (!stickyInReticle && !shootingAutoReady) return
     const interval = window.setInterval(() => {
       handleShootRef.current()
     }, AUTO_FIRE_HOLD_MS)
     return () => clearInterval(interval)
-  }, [stickyInReticle, autoFireEnabled])
+  }, [stickyInReticle, autoFireEnabled, shootingAutoReady])
 
   // ── Bluetooth トリガー: キーボードイベント ────────────────────────────────
   useEffect(() => {
@@ -585,6 +674,11 @@ export default function GamePage() {
       alert('ソロプレイは GPS が必要です。\nGPS が取得できてからゲームを開始してください。')
       return
     }
+    // シューティングモードは base_lat/lng 固定のため GPS 必須
+    if (balanceSettings.gameMode === 'shooting' && !geoPos) {
+      alert('シューティングモードは GPS が必要です。\n（プレイヤー位置を固定するため）')
+      return
+    }
     setIsStarting(true)
     try {
       // ホストの現在 GPS 位置をフィールド中心として使用
@@ -606,6 +700,8 @@ export default function GamePage() {
         sheriffEnabled:   balanceSettings.sheriffEnabled,
         botCount:         balanceSettings.soloMode ? balanceSettings.botCount : 0,
         botDifficulty:    balanceSettings.botDifficulty,
+        shootingEnvironment: balanceSettings.shootingEnvironment,
+        shootingMaxActive:   balanceSettings.shootingMaxActive,
       })
     } catch { setIsStarting(false) }
   }
@@ -793,6 +889,33 @@ export default function GamePage() {
         />
       )}
 
+      {/* ── シューティングモード UI ──────────────────────────────────────────── */}
+      {isActive && isShootingMode && selfPlayer?.is_alive && geoPos && (
+        <>
+          <ShootingHUD
+            environment={shootingEnv}
+            score={shooting.score}
+            combo={shooting.combo}
+            maxCombo={shooting.maxCombo}
+            ammo={shooting.ammo}
+            magSize={shooting.magSize}
+            isReloading={shooting.isReloading}
+            reloadProgress={shooting.reloadProgress}
+            targetsActive={shooting.targets.length}
+            onManualReload={shooting.manualReload}
+          />
+          <ShootingTargetOverlay
+            geoPos={geoPos}
+            targets={shooting.targets}
+            environment={shootingEnv}
+            aimedId={shooting.aimed?.id ?? null}
+            now={shooting.now}
+          />
+          <ShootingScoreFeed feedRef={scoreFeedRef} />
+          <ReloadOverlay visible={shooting.isReloading} progress={shooting.reloadProgress} />
+        </>
+      )}
+
       {/* ── ソロプレイ: ボット AR オーバーレイ ────────────────────────────────── */}
       {isActive && isSoloMode && selfPlayer?.is_alive && geoPos && (
         <AREntityOverlay
@@ -964,7 +1087,12 @@ export default function GamePage() {
           </div>
           {isHost && (
             <div className="w-full max-w-xs">
-              <GameSettings {...balanceSettings} onChange={setBalance} playerCount={humanPlayers.length || players.length} />
+              <GameSettings
+                {...balanceSettings}
+                onChange={setBalance}
+                playerCount={humanPlayers.length || players.length}
+                gpsAccuracyM={geoPos?.accuracy ?? null}
+              />
             </div>
           )}
           {/* 非ホスト向けモード表示 */}
@@ -986,16 +1114,18 @@ export default function GamePage() {
               </a>
             </div>
           )}
-          {isHost && (players.length >= 2 || balanceSettings.soloMode || balanceSettings.gameMode === 'hunting') && (
+          {isHost && (players.length >= 2 || balanceSettings.soloMode || balanceSettings.gameMode === 'hunting' || balanceSettings.gameMode === 'shooting') && (
             <Button onClick={handleStartGame} loading={isStarting}>
               {balanceSettings.soloMode
                 ? `ソロ開始 (CPU${balanceSettings.botCount}体)`
                 : balanceSettings.gameMode === 'hunting'
                 ? `ハンティング開始 (${players.length}人 vs NPC)`
+                : balanceSettings.gameMode === 'shooting'
+                ? `シューティング開始 (${balanceSettings.shootingEnvironment === 'indoor' ? '🏠 INDOOR' : '🌲 OUTDOOR'})`
                 : `ゲーム開始 (${players.length}人)`}
             </Button>
           )}
-          {isHost && players.length < 2 && !balanceSettings.soloMode && balanceSettings.gameMode !== 'hunting' && (
+          {isHost && players.length < 2 && !balanceSettings.soloMode && balanceSettings.gameMode !== 'hunting' && balanceSettings.gameMode !== 'shooting' && (
             <p className="text-gray-300 text-sm bg-black/60 px-3 py-1 rounded-lg">
               あと{2 - players.length}人参加で開始 / またはソロモードをオン
             </p>

@@ -27,16 +27,22 @@ export default async function ResultPage({ params }: ResultPageProps) {
     .eq('game_id', gameId)
     .order('joined_at', { ascending: true })
 
-  const winner      = game?.winner as { name: string; qr_code_id: string } | null
-  const winnerTeam  = game?.winner_team ?? null
-  const gameMode    = game?.game_mode ?? 'deathmatch'
-  const isTraitorMode = gameMode === 'traitor'
-  const hostPlayer  = players?.[0]
+  const winner       = game?.winner as { name: string; qr_code_id: string } | null
+  const winnerTeam   = game?.winner_team ?? null
+  const gameMode     = game?.game_mode ?? 'deathmatch'
+  const isTraitorMode  = gameMode === 'traitor'
+  const isShootingMode = gameMode === 'shooting'
+  const hostPlayer   = players?.[0]
 
-  // スコア表示は kills 降順 → hp 降順
-  const sortedPlayers = [...(players ?? [])].sort(
-    (a, b) => b.kills - a.kills || b.hp - a.hp
-  )
+  // シューティング: shooting_score 降順 → max_combo 降順
+  // それ以外: kills 降順 → hp 降順
+  const sortedPlayers = [...(players ?? [])].sort((a, b) => {
+    if (isShootingMode) {
+      return (b.shooting_score - a.shooting_score)
+        || (b.shooting_max_combo - a.shooting_max_combo)
+    }
+    return (b.kills - a.kills) || (b.hp - a.hp)
+  })
 
   // キルカム証拠写真（killcam_url がある = 撃たれたプレイヤー）
   const killcamPlayers = (players ?? []).filter((p) => p.killcam_url)
@@ -92,8 +98,47 @@ export default async function ResultPage({ params }: ResultPageProps) {
           )}
         </div>
 
-        {/* スコアボード */}
-        {sortedPlayers.length > 0 && (
+        {/* スコアボード（シューティングモード） */}
+        {isShootingMode && sortedPlayers.length > 0 && (
+          <div className="w-full bg-gray-900 rounded-2xl overflow-hidden">
+            <div className="grid grid-cols-[1.5rem_1fr_3.5rem_2.5rem_2.5rem] gap-2 px-4 py-2 bg-gray-800 text-gray-500 text-xs uppercase tracking-wide">
+              <span>#</span>
+              <span>名前</span>
+              <span className="text-right">SCORE</span>
+              <span className="text-center">CMB</span>
+              <span className="text-center">MISS</span>
+            </div>
+            {sortedPlayers.filter(p => !p.is_bot).map((p, i) => {
+              const isWinner = i === 0 && p.shooting_score > 0
+              return (
+                <div
+                  key={p.id}
+                  className={`grid grid-cols-[1.5rem_1fr_3.5rem_2.5rem_2.5rem] gap-2 px-4 py-3 items-center border-t border-gray-800
+                    ${isWinner ? 'bg-amber-400/10' : ''}
+                  `}
+                >
+                  <span className="text-gray-500 text-sm">{i + 1}</span>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    {isWinner && <span className="text-amber-400 text-sm flex-shrink-0">👑</span>}
+                    <span className="text-white font-medium truncate">{p.name}</span>
+                  </div>
+                  <span className="text-amber-300 font-mono font-bold text-right tabular-nums">
+                    {p.shooting_score.toLocaleString()}
+                  </span>
+                  <span className="text-red-400 text-xs font-mono text-center">
+                    ×{p.shooting_max_combo}
+                  </span>
+                  <span className="text-gray-500 text-xs font-mono text-center">
+                    {p.shooting_misses}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {/* スコアボード（その他モード） */}
+        {!isShootingMode && sortedPlayers.length > 0 && (
           <div className="w-full bg-gray-900 rounded-2xl overflow-hidden">
             <div className={`grid ${isTraitorMode ? 'grid-cols-[1.5rem_1fr_3rem_2.5rem_2.5rem_2.5rem]' : 'grid-cols-[1.5rem_1fr_2.5rem_2.5rem_2.5rem]'} gap-2 px-4 py-2 bg-gray-800 text-gray-500 text-xs uppercase tracking-wide`}>
               <span>#</span>
