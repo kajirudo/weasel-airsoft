@@ -1,6 +1,7 @@
 import { LobbyForm }          from '@/components/lobby/LobbyForm'
 import { TutorialOverlay }    from '@/components/lobby/TutorialOverlay'
 import { MarkerModeSelector } from '@/components/lobby/MarkerModeSelector'
+import { DisclaimerModal }    from '@/components/lobby/DisclaimerModal'
 
 export default function LobbyPage() {
   return (
@@ -23,6 +24,9 @@ export default function LobbyPage() {
 
       {/* 初回のみ表示されるチュートリアル */}
       <TutorialOverlay />
+
+      {/* 毎セッション表示される免責事項（z-[300] でチュートリアルより前面） */}
+      <DisclaimerModal />
     </div>
   )
 }
