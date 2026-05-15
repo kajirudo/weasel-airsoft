@@ -208,38 +208,47 @@ export const BOT_DIFFICULTY_LABELS: Record<BotDifficulty, string> = {
 /** スポーン管理ループ間隔（ms） */
 export const SHOOTING_TICK_MS = 250
 
-/** Indoor: クイックショット体験 */
+/**
+ * Indoor: 大きい的・近距離感・たくさんスポーン。テンポ重視。
+ *
+ * ───── 座標モデル ─────
+ * 仮想の的を画面上の (x%, y%) に配置するタップ式 AR シューター。
+ *   `bearing_deg` 列 → X% (0..100)
+ *   `dist_m`      列 → Y% (0..100)
+ * 旧コンパス／極座標ロジックは廃止。
+ */
 export const SHOOTING_INDOOR = {
-  minRangeM:        1.5,
+  minRangeM:        1.5,       // 後方互換用
   maxRangeM:        5,
-  spawnIntervalMs:  1500,
-  targetLifetimeMs: 4000,
-  maxActive:        4,
+  spawnIntervalMs:  900,
+  targetLifetimeMs: 4500,
+  maxActive:        5,
   travelMs:         0,
-  hitAngleDeg:      8,        // レティクル中心からの許容角度（広め＝クイック）
-  comboBonus:       25,
-  missPenalty:      -20,
+  comboBonus:       30,
+  missPenalty:      -15,
   expirePenalty:    -10,
-  magSize:          12,
-  reloadMs:         1200,
-  distanceBonus:    0,        // Indoor は距離ボーナスなし
+  magSize:          15,
+  reloadMs:         1100,
+  distanceBonus:    0,
+  /** 画面に対する基準サイズ (vw 相当の %) */
+  targetBaseSize:   16,
 } as const
 
-/** Outdoor: スナイパー体験 */
+/** Outdoor: 小さい的・遠距離感・少なめ多発。難易度高め */
 export const SHOOTING_OUTDOOR = {
   minRangeM:        10,
   maxRangeM:        40,
-  spawnIntervalMs:  3500,
-  targetLifetimeMs: 8000,
-  maxActive:        3,
-  travelMs:         450,
-  hitAngleDeg:      3,
-  comboBonus:       40,
-  missPenalty:      -10,
+  spawnIntervalMs:  1300,
+  targetLifetimeMs: 5500,
+  maxActive:        4,
+  travelMs:         0,
+  comboBonus:       45,
+  missPenalty:      -8,
   expirePenalty:    -5,
-  magSize:          6,         // ボルトアクション風
-  reloadMs:         2200,
-  distanceBonus:    5,         // (dist_m - minRange) * 5 点
+  magSize:          10,
+  reloadMs:         1700,
+  distanceBonus:    0,         // 新モデルでは未使用
+  targetBaseSize:   11,
 } as const
 
 /** ターゲット種別ごとの特性。クライアント側でランダム抽選するが
@@ -267,9 +276,11 @@ export const SHOOTING_TARGET_KINDS: Record<ShootingTargetKind, {
               label: 'BONUS', emoji: '⭐', color: '#fbbf24' },
 }
 
+/** プレイヤーが選択可能な制限時間 (分) */
+export const SHOOTING_DURATION_OPTIONS: readonly number[] = [1, 3] as const
 export const SHOOTING_DURATION_MIN_DEFAULT      = 3
-export const SHOOTING_GPS_ACC_INDOOR_HINT_M     = 30   // accuracy 超過で Indoor 推奨
-export const SHOOTING_DEFAULT_FOV_DEG           = 60   // AR 投影 FOV
+export const SHOOTING_GPS_ACC_INDOOR_HINT_M     = 30   // 後方互換
+export const SHOOTING_DEFAULT_FOV_DEG           = 60   // 後方互換
 
 /** 環境ごとの定数まとめて取得 */
 export function shootingEnvConfig(env: ShootingEnvironment) {

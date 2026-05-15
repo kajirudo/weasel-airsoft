@@ -1,26 +1,30 @@
 'use client'
 
 /**
- * useShootingMode — シューティングモードの統括フック
+ * useShootingMode — タップ式 AR シューター 統括フック
+ *
+ * ─── 座標モデル ──────────────────────────────────────────────────────────────
+ *   ターゲットを画面上の (x%, y%) に配置するタップ式 AR シューター。
+ *   旧コンパス／極座標エイムは廃止。
+ *   `shooting_targets` テーブルのカラムを以下に再解釈:
+ *     bearing_deg → X% (0..100)
+ *     dist_m      → Y% (0..100)
+ *     drift_dps   → X方向ドリフト (%/sec)。runner/bonus が動く演出に使う。
  *
  * 責務:
- *   - 自分のターゲットを Realtime 購読 (useShootingTargets)
- *   - 自分の周囲にターゲットをスポーン (useShootingSpawner)
- *   - 方位ベースのエイム判定 (useShootingAim)
- *   - 寿命切れターゲットの自動 expire (useShootingExpiry)
- *   - 弾倉・リロード管理 (useShootingReload)
+ *   - 自分のターゲット Realtime 購読
+ *   - 自分のターゲットスポーン（クライアントが画面位置をランダム生成）
+ *   - 寿命切れ自動 expire
+ *   - 弾倉・リロード管理
  *
- * 「render 内 Date.now()」は徹底排除。`now` ステート + setInterval で統一。
+ *  「タップで撃つ」ロジックは page.tsx 側で targetTap → registerShootingHit を呼ぶ。
  */
 
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { Player, ShootingTarget, ShootingEnvironment } from '@/types/database'
-import type { GeoPosition } from '@/hooks/useRadar'
-import { normAngle } from '@/lib/game/geo'
 import {
-  SHOOTING_TICK_MS, SHOOTING_INDOOR, SHOOTING_OUTDOOR,
-  shootingEnvConfig, pickShootingKind,
+  SHOOTING_TICK_MS, shootingEnvConfig, pickShootingKind,
 } from '@/lib/game/constants'
 import {
   spawnShootingTarget, expireShootingTarget,
@@ -51,7 +55,6 @@ function useShootingTargets(params: {
     if (!enabled || !gameId || !selfId) return
     const supabase = supabaseRef.current
 
-    // 初回フェッチ
     supabase.from('shooting_targets')
       .select('*')
       .eq('game_id', gameId)
@@ -78,7 +81,6 @@ function useShootingTargets(params: {
           }
           if (payload.eventType === 'UPDATE') {
             const next = payload.new
-            // killed_at がセットされたら除外
             if (next.killed_at) return prev.filter(t => t.id !== next.id)
             return prev.map(t => t.id === next.id ? next : t)
           }
@@ -96,7 +98,7 @@ function useShootingTargets(params: {
   return targets
 }
 
-// ─── 2. スポーン: 自分のクライアントが自分の周辺に湧かせる ─────────────────
+// ─── 2. スポーン: ランダム画面位置で生成 ───────────────────────────────────
 function useShootingSpawner(params: {
   gameId:      string | null
   playerId:    string | null
@@ -108,7 +110,6 @@ function useShootingSpawner(params: {
   const { gameId, playerId, deviceId, environment, activeCount, enabled } = params
   const cfg = shootingEnvConfig(environment)
 
-  // ref で stale closure 回避（effect 内で同期する — render 中の ref 代入は禁止）
   const activeRef = useRef(activeCount)
   useEffect(() => { activeRef.current = activeCount }, [activeCount])
 
@@ -125,72 +126,27 @@ function useShootingSpawner(params: {
       lastSpawnRef.current = now
       inflightRef.current  = true
       try {
-        const bearing = Math.random() * 360
-        const distM   = cfg.minRangeM + Math.random() * (cfg.maxRangeM - cfg.minRangeM)
-        const kind    = pickShootingKind()
+        // 画面の安全領域 [10..90]% x [25..75]% にランダム配置
+        // (上端は HUD/Timer、下端はリロードボタン領域を避ける)
+        const x = 10 + Math.random() * 80
+        const y = 25 + Math.random() * 50
+        const kind = pickShootingKind()
         await spawnShootingTarget({
           gameId, playerId, deviceId, kind,
-          bearingDeg: bearing, distM, environment,
+          bearingDeg: x, distM: y, environment,
         })
       } catch {
-        // 個別の失敗は無視（次の tick で再試行）
+        // 失敗は次の tick で再試行
       } finally {
         inflightRef.current = false
       }
     }, SHOOTING_TICK_MS)
     return () => clearInterval(id)
   }, [enabled, gameId, playerId, deviceId, environment,
-      cfg.maxActive, cfg.spawnIntervalMs, cfg.minRangeM, cfg.maxRangeM])
+      cfg.maxActive, cfg.spawnIntervalMs])
 }
 
-// ─── 3. エイム判定 ─────────────────────────────────────────────────────────
-export interface AimedTarget {
-  id:       string
-  kind:     ShootingTarget['kind']
-  distM:    number
-  travelMs: number
-  hp:       number
-  maxHp:    number
-}
-
-function useShootingAim(params: {
-  targets:     ShootingTarget[]
-  geoPos:      GeoPosition | null
-  environment: ShootingEnvironment
-  now:         number
-}): { aimed: AimedTarget | null } {
-  const { targets, geoPos, environment, now } = params
-  const cfg = shootingEnvConfig(environment)
-
-  const aimed = useMemo<AimedTarget | null>(() => {
-    if (!geoPos) return null
-    let best: AimedTarget | null = null
-    let bestAngle = Infinity
-    for (const t of targets) {
-      if (t.killed_at) continue
-      const expiresAt = new Date(t.expires_at).getTime()
-      if (expiresAt <= now) continue
-      const spawnAt   = new Date(t.spawn_at).getTime()
-      const elapsedS  = (now - spawnAt) / 1000
-      const curBear   = (t.bearing_deg + t.drift_dps * elapsedS + 360) % 360
-      const rel       = normAngle(curBear - geoPos.heading)
-      const eff       = cfg.hitAngleDeg * t.size_factor
-      if (Math.abs(rel) > eff) continue
-      if (Math.abs(rel) < bestAngle) {
-        bestAngle = Math.abs(rel)
-        best = {
-          id: t.id, kind: t.kind, distM: t.dist_m,
-          travelMs: t.travel_ms, hp: t.hp, maxHp: t.max_hp,
-        }
-      }
-    }
-    return best
-  }, [targets, geoPos, now, cfg.hitAngleDeg])
-
-  return { aimed }
-}
-
-// ─── 4. 期限切れ自動処理 ───────────────────────────────────────────────────
+// ─── 3. 期限切れ自動処理 ───────────────────────────────────────────────────
 function useShootingExpiry(params: {
   targets:     ShootingTarget[]
   playerId:    string | null
@@ -221,7 +177,7 @@ function useShootingExpiry(params: {
   }, [targets, playerId, deviceId, environment, enabled])
 }
 
-// ─── 5. リロード管理 ───────────────────────────────────────────────────────
+// ─── 4. リロード管理 ───────────────────────────────────────────────────────
 function useShootingReload(params: {
   selfPlayer:  Player | undefined
   playerId:    string | null
@@ -231,7 +187,7 @@ function useShootingReload(params: {
 }) {
   const { selfPlayer, playerId, deviceId, environment, enabled } = params
   const cfg = shootingEnvConfig(environment)
-  const now = useNow(150)
+  const now = useNow(120)
 
   const ammo          = selfPlayer?.shooting_ammo ?? 0
   const reloadUntilMs = selfPlayer?.shooting_reload_until
@@ -241,24 +197,20 @@ function useShootingReload(params: {
     ? Math.max(0, Math.min(1, 1 - (reloadUntilMs - now) / cfg.reloadMs))
     : 0
 
-  // ammo == 0 を検知して自動リロード
   const triggeredRef = useRef<string | null>(null)
   useEffect(() => {
     if (!enabled || !playerId || !deviceId) return
     if (ammo > 0) {
-      // 弾が補充されたらキーをリセット（次回 ammo==0 で確実に再トリガーできるよう）
       triggeredRef.current = null
       return
     }
     if (isReloading)  return
-    // 同じ「ammo==0」状態で何度も発火しないようキーで一意化
     const key = `${playerId}:${reloadUntilMs}`
     if (triggeredRef.current === key) return
     triggeredRef.current = key
     triggerShootingReload({ playerId, deviceId, environment }).catch(() => {})
   }, [enabled, ammo, isReloading, playerId, deviceId, environment, reloadUntilMs])
 
-  // reload_until 到達で finishReload
   useEffect(() => {
     if (!enabled || !playerId || !deviceId)         return
     if (!isReloading || reloadUntilMs === 0)        return
@@ -273,11 +225,11 @@ function useShootingReload(params: {
   const manualReload = useCallback(() => {
     if (!playerId || !deviceId)               return
     if (isReloading)                          return
-    if (ammo >= cfg.magSize)                  return  // 満タンなら不要
+    if (ammo >= cfg.magSize)                  return
     triggerShootingReload({ playerId, deviceId, environment }).catch(() => {})
   }, [playerId, deviceId, environment, isReloading, ammo, cfg.magSize])
 
-  return { ammo, magSize: cfg.magSize, isReloading, reloadProgress, manualReload }
+  return { ammo, magSize: cfg.magSize, isReloading, reloadProgress, manualReload, now }
 }
 
 // ─── 統括 ──────────────────────────────────────────────────────────────────
@@ -287,35 +239,26 @@ interface UseShootingModeParams {
   playerId:    string | null
   deviceId:    string | null
   selfPlayer:  Player | undefined
-  geoPos:      GeoPosition | null
   environment: ShootingEnvironment
   enabled:     boolean
 }
 
 export interface ShootingState {
   targets:        ShootingTarget[]
-  aimed:          AimedTarget | null
   environment:    ShootingEnvironment
-  hitAngleDeg:    number
-  // スコア
   score:          number
   combo:          number
   maxCombo:       number
-  // 弾倉
   ammo:           number
   magSize:        number
   isReloading:    boolean
   reloadProgress: number
   manualReload:   () => void
-  // 内部 now （UI 進捗計算用）
   now:            number
 }
 
 export function useShootingMode(p: UseShootingModeParams): ShootingState {
-  const { gameId, playerId, deviceId, selfPlayer, geoPos, environment, enabled } = p
-
-  // 共通 now (高頻度) — エイム判定用
-  const now = useNow(120)
+  const { gameId, playerId, deviceId, selfPlayer, environment, enabled } = p
 
   const targets = useShootingTargets({ gameId, selfId: playerId, enabled })
 
@@ -324,17 +267,13 @@ export function useShootingMode(p: UseShootingModeParams): ShootingState {
     activeCount: targets.length, enabled,
   })
 
-  const { aimed } = useShootingAim({ targets, geoPos, environment, now })
-
   useShootingExpiry({ targets, playerId, deviceId, environment, enabled })
 
   const reload = useShootingReload({ selfPlayer, playerId, deviceId, environment, enabled })
 
   return {
     targets,
-    aimed,
     environment,
-    hitAngleDeg: environment === 'indoor' ? SHOOTING_INDOOR.hitAngleDeg : SHOOTING_OUTDOOR.hitAngleDeg,
     score:    selfPlayer?.shooting_score     ?? 0,
     combo:    selfPlayer?.shooting_combo     ?? 0,
     maxCombo: selfPlayer?.shooting_max_combo ?? 0,
@@ -343,6 +282,6 @@ export function useShootingMode(p: UseShootingModeParams): ShootingState {
     isReloading:    reload.isReloading,
     reloadProgress: reload.reloadProgress,
     manualReload:   reload.manualReload,
-    now,
+    now:            reload.now,
   }
 }

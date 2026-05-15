@@ -17,6 +17,8 @@ interface CameraViewProps {
   offline?:    boolean
   /** 'qr'（デフォルト）または 'aruco' */
   markerMode?: MarkerMode
+  /** レティクルとズームボタンを隠す（シューティングモード用） */
+  hideReticle?: boolean
 }
 
 /** CameraView から親に公開するメソッド群 */
@@ -32,7 +34,7 @@ function vibrate(pattern: VibratePattern) {
 const ZOOM_PRESETS = [1, 2, 4] as const
 
 export const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(
-  function CameraView({ onQRDetected, onShoot, isInReticle, offline = false, markerMode = 'qr' }, ref) {
+  function CameraView({ onQRDetected, onShoot, isInReticle, offline = false, markerMode = 'qr', hideReticle = false }, ref) {
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const { videoRef, isReady, error, zoomInfo, setZoom } = useCamera()
 
@@ -102,10 +104,12 @@ export const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(
         <canvas ref={canvasRef} className="hidden" />
 
         {/* レティクル（ズーム倍率を渡してスコープ表示を切り替える） */}
-        <Reticle active={isInReticle} offline={offline} zoom={currentZoom} />
+        {!hideReticle && (
+          <Reticle active={isInReticle} offline={offline} zoom={currentZoom} />
+        )}
 
         {/* ズーム切り替えボタン（対応端末かつ2種類以上ある場合のみ表示） */}
-        {availablePresets.length >= 2 && (
+        {!hideReticle && availablePresets.length >= 2 && (
           <div
             className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-2"
             onClick={(e) => e.stopPropagation()}

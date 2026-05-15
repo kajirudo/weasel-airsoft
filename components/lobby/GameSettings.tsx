@@ -9,7 +9,7 @@ import {
   HUNTING_BACKSTAB_RANGE_M, HUNTING_BACKSTAB_ANGLE,
   HUNTING_ATTACK_COOLDOWN_MS,
   BOT_DIFFICULTY_LABELS, BOT_SHOOT_RANGE_M,
-  SHOOTING_INDOOR, SHOOTING_OUTDOOR,
+  SHOOTING_INDOOR, SHOOTING_OUTDOOR, SHOOTING_DURATION_OPTIONS,
 } from '@/lib/game/constants'
 
 export interface GameSettingsValues {
@@ -78,7 +78,7 @@ export function GameSettings({
   traitorCount, sheriffEnabled,
   soloMode, botCount, botDifficulty,
   shootingEnvironment, shootingMaxActive,
-  playerCount, gpsAccuracyM,
+  playerCount,
   onChange,
 }: GameSettingsProps) {
   const set = (partial: Partial<GameSettingsValues>) =>
@@ -96,7 +96,11 @@ export function GameSettings({
     const newTeamMode = mode === 'tactics' ? true : mode === 'traitor' ? false : teamMode
     // hunting / shooting はソロモード無効（NPC / 固定ターゲットで完結）
     const newSolo = (mode === 'hunting' || mode === 'shooting') ? false : soloMode
-    set({ gameMode: mode, teamMode: newTeamMode, soloMode: newSolo })
+    // シューティングは durationMinutes を 1 or 3 に強制（推奨: 3）
+    const newDuration = mode === 'shooting'
+      ? (SHOOTING_DURATION_OPTIONS.includes(durationMinutes) ? durationMinutes : 3)
+      : durationMinutes
+    set({ gameMode: mode, teamMode: newTeamMode, soloMode: newSolo, durationMinutes: newDuration })
   }
 
   return (
@@ -128,7 +132,7 @@ export function GameSettings({
           {gameMode === 'tactics'  && '3拠点をチームで奪い合う。時間終了時に拠点得点が多い方が勝利。'}
           {gameMode === 'traitor'  && '中に潜むスパイを投票で追放せよ。タスク完了か全員追放で Crew 勝利。'}
           {gameMode === 'hunting'  && 'プレイヤー全員 vs NPC（鬼）。背後攻撃でHPをゼロにするか、封印ポイントに近づいてホールドで全解除すると勝利。捕まったら脱落。'}
-          {gameMode === 'shooting' && 'その場固定でターゲットを撃ち抜くスコア競争。Indoor は近距離・Outdoor は遠距離。リロード・連続撃破コンボあり。'}
+          {gameMode === 'shooting' && '画面に現れるターゲットをタップで撃ち抜くスコア競争。Indoor は的が大きく多発、Outdoor は小さく難易度高め。リロード・連続撃破コンボあり。'}
         </p>
       </div>
 
@@ -137,13 +141,37 @@ export function GameSettings({
         <div className="space-y-3 border border-amber-900/50 rounded-lg p-3 bg-amber-900/10">
           <p className="text-amber-400 text-xs font-semibold">🎯 シューティング 設定</p>
 
-          {/* Indoor / Outdoor */}
+          {/* 制限時間 (1分 / 3分) */}
           <div>
-            <p className="text-gray-400 text-xs mb-1.5">環境</p>
+            <p className="text-gray-400 text-xs mb-1.5">制限時間</p>
+            <div className="flex gap-2">
+              {SHOOTING_DURATION_OPTIONS.map(m => (
+                <button
+                  key={m}
+                  onClick={() => set({ durationMinutes: m })}
+                  className={[
+                    'flex-1 py-2.5 rounded-lg text-sm font-bold border transition-all',
+                    durationMinutes === m
+                      ? 'bg-amber-600/30 border-amber-500 text-amber-300'
+                      : 'bg-gray-800 border-gray-700 text-gray-500',
+                  ].join(' ')}
+                >
+                  {m} 分
+                  {m === 3 && (
+                    <span className="block text-[9px] opacity-70 mt-0.5">推奨</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 難易度 (Indoor / Outdoor) */}
+          <div>
+            <p className="text-gray-400 text-xs mb-1.5">難易度</p>
             <div className="flex gap-2">
               {([
-                { v: 'indoor'  as const, label: '🏠 INDOOR',  desc: '1.5〜5m' },
-                { v: 'outdoor' as const, label: '🌲 OUTDOOR', desc: '10〜40m' },
+                { v: 'indoor'  as const, label: '🏠 EASY',  desc: '大きい的・多発' },
+                { v: 'outdoor' as const, label: '🌲 HARD',  desc: '小さい的・少なめ' },
               ]).map(o => (
                 <button
                   key={o.v}
@@ -160,41 +188,28 @@ export function GameSettings({
                 </button>
               ))}
             </div>
-            {/* GPS 精度が低ければ Indoor を推奨 */}
-            {gpsAccuracyM != null && gpsAccuracyM > 30 && shootingEnvironment === 'outdoor' && (
-              <p className="text-orange-400 text-[11px] mt-1.5 leading-snug">
-                ⚠ GPS 精度が低い ({Math.round(gpsAccuracyM)}m) — Indoor 推奨
-              </p>
-            )}
           </div>
 
           {/* パラメータ表示 */}
           <div className="grid grid-cols-2 gap-2 text-[10px]">
             <div className="bg-gray-800/60 rounded-lg p-2 space-y-0.5">
-              <p className="text-orange-400 font-bold">🏠 INDOOR</p>
-              <p className="text-gray-400">距離 {SHOOTING_INDOOR.minRangeM}〜{SHOOTING_INDOOR.maxRangeM}m</p>
+              <p className="text-orange-400 font-bold">🏠 EASY</p>
               <p className="text-gray-400">弾倉 {SHOOTING_INDOOR.magSize}発</p>
               <p className="text-gray-400">リロード {SHOOTING_INDOOR.reloadMs / 1000}s</p>
-              <p className="text-gray-400">判定 ±{SHOOTING_INDOOR.hitAngleDeg}°</p>
+              <p className="text-gray-400">最大同時 {SHOOTING_INDOOR.maxActive}体</p>
             </div>
             <div className="bg-gray-800/60 rounded-lg p-2 space-y-0.5">
-              <p className="text-blue-400 font-bold">🌲 OUTDOOR</p>
-              <p className="text-gray-400">距離 {SHOOTING_OUTDOOR.minRangeM}〜{SHOOTING_OUTDOOR.maxRangeM}m</p>
+              <p className="text-blue-400 font-bold">🌲 HARD</p>
               <p className="text-gray-400">弾倉 {SHOOTING_OUTDOOR.magSize}発</p>
               <p className="text-gray-400">リロード {SHOOTING_OUTDOOR.reloadMs / 1000}s</p>
-              <p className="text-gray-400">判定 ±{SHOOTING_OUTDOOR.hitAngleDeg}°</p>
+              <p className="text-gray-400">最大同時 {SHOOTING_OUTDOOR.maxActive}体</p>
             </div>
           </div>
 
-          <SliderField
-            label="同時最大ターゲット数" value={shootingMaxActive} min={1} max={6} step={1}
-            displayValue={`${shootingMaxActive}体`}
-            onChange={(v) => set({ shootingMaxActive: v })}
-          />
           <p className="text-gray-600 text-xs leading-snug">
-            ターゲット種別: STD(60%) / TOUGH(15%) / TINY(12%) / RUN(10%) / BONUS(3%)
+            ターゲットをタップで撃ち抜く。種別: 🎯STD(60%) / 🛡TOUGH(15%) / 🔻TINY(12%) / 💨RUN(10%) / ⭐BONUS(3%)
             <br />
-            ボーナス ⭐ は超高得点 (+1000)。タフ 🛡 は3発必要。タイニー 🔻 は判定シビア。
+            ⭐BONUS は +1000点。🛡TOUGH は3発必要。🔻TINY は小さくて当てにくい。💨RUN は動く。
           </p>
         </div>
       )}
@@ -389,11 +404,14 @@ export function GameSettings({
         displayValue={`${shootCooldown}ms`}
         onChange={(v) => set({ shootCooldown: v })}
       />
-      <SliderField
-        label="制限時間" value={durationMinutes} min={0} max={30} step={5}
-        displayValue={durationMinutes === 0 ? '無制限' : `${durationMinutes}分`}
-        onChange={(v) => set({ durationMinutes: v })}
-      />
+      {/* シューティングモードは専用の 1分/3分 トグルを使うので汎用スライダーを隠す */}
+      {gameMode !== 'shooting' && (
+        <SliderField
+          label="制限時間" value={durationMinutes} min={0} max={30} step={5}
+          displayValue={durationMinutes === 0 ? '無制限' : `${durationMinutes}分`}
+          onChange={(v) => set({ durationMinutes: v })}
+        />
+      )}
 
       {/* ── マーカーモード ────────────────────────────────────────────────── */}
       <div>

@@ -306,13 +306,12 @@ export default function GamePage() {
   })
 
   // ── シューティング: ターゲット管理 ────────────────────────────────────────
-  const shootingEnv: ShootingEnvironment = (game?.shooting_environment ?? 'outdoor') as ShootingEnvironment
+  const shootingEnv: ShootingEnvironment = (game?.shooting_environment ?? 'indoor') as ShootingEnvironment
   const shooting = useShootingMode({
     gameId:      isShootingMode ? gameId : null,
     playerId:    session?.playerId ?? null,
     deviceId:    session?.deviceId ?? null,
     selfPlayer,
-    geoPos,
     environment: shootingEnv,
     enabled:     isActive && isShootingMode && (selfPlayer?.is_alive ?? true),
   })
@@ -438,54 +437,52 @@ export default function GamePage() {
     return () => clearTimeout(id)
   }, [game?.sabotage_type, game?.sabotage_until])
 
-  // ── シューティングモード射撃 ────────────────────────────────────────────
+  // ── シューティングモード ────────────────────────────────────────────────
   const shootingRef = useRef(shooting)
   useEffect(() => { shootingRef.current = shooting }, [shooting])
 
-  const handleShootingTrigger = useCallback(async () => {
+  /** 的が直接タップされた時 (ShootingTargetOverlay から呼ばれる) */
+  const handleTargetTap = useCallback(async (targetId: string) => {
     if (!session || !isShootingMode) return
     if (isOffline || cdBlock) return
     const s = shootingRef.current
-    if (s.isReloading) return
-    if (s.ammo <= 0) {
-      // 自動でリロードがかかるが、即時フィードバックとして空撃ち音を抑制
-      return
-    }
-
-    if (s.aimed) {
-      const target = s.aimed
-      const fireAt = target.travelMs > 0
-        ? new Promise<void>(r => setTimeout(r, target.travelMs))
-        : Promise.resolve()
-      await fireAt
-      try {
-        const result = await registerShootingHit({
-          gameId,
-          playerId:    session.playerId,
-          deviceId:    session.deviceId,
-          targetId:    target.id,
-          environment: shootingEnv,
-        })
-        if (result.killed && result.score && result.kind) {
-          scoreFeedRef.current?.push(result.score, result.kind, result.combo ?? 0)
-          result.kind === 'bonus' ? playKill() : playShot()
-        } else if (!result.error) {
-          // tough を傷つけたが未撃破
-          playHit()
+    if (s.isReloading || s.ammo <= 0) return
+    try {
+      const result = await registerShootingHit({
+        gameId,
+        playerId:    session.playerId,
+        deviceId:    session.deviceId,
+        targetId,
+        environment: shootingEnv,
+      })
+      if (result.killed && result.score && result.kind) {
+        scoreFeedRef.current?.push(result.score, result.kind, result.combo ?? 0)
+        if (result.kind === 'bonus') {
+          playKill()
+        } else {
+          playShot()
         }
-      } catch { /* ignore */ }
-    } else {
-      // 空撃ち: 弾消費 + コンボリセット
-      try {
-        await registerShootingMiss({
-          playerId:    session.playerId,
-          deviceId:    session.deviceId,
-          environment: shootingEnv,
-        })
-      } catch { /* ignore */ }
-      playShot()
-    }
+      } else if (!result.error) {
+        playHit()  // tough 未撃破
+      }
+    } catch { /* ignore */ }
   }, [session, isShootingMode, isOffline, cdBlock, gameId, shootingEnv, playShot, playHit, playKill])
+
+  /** 何もない場所をタップした時 = 外し */
+  const handleShootingMiss = useCallback(async () => {
+    if (!session || !isShootingMode) return
+    if (isOffline || cdBlock) return
+    const s = shootingRef.current
+    if (s.isReloading || s.ammo <= 0) return
+    try {
+      await registerShootingMiss({
+        playerId:    session.playerId,
+        deviceId:    session.deviceId,
+        environment: shootingEnv,
+      })
+    } catch { /* ignore */ }
+    playShot()
+  }, [session, isShootingMode, isOffline, cdBlock, shootingEnv, playShot])
 
   // ── 射撃コア（ID指定） ────────────────────────────────────────────────────
   const shootTarget = useCallback(async (targetQrCodeId: QrCodeId) => {
@@ -517,20 +514,20 @@ export default function GamePage() {
     } catch { /* 無視 */ }
   }, [session, gameId, shootCooldown, isOffline, cdBlock, game?.status, playShot, playKill])
 
-  // マニュアル射撃（タップ）— シューティングモードでは QR 不要
+  // マニュアル射撃（タップ）— シューティングモードはカメラ背景タップ = miss
   const handleShoot = useCallback(async () => {
-    if (isShootingMode) { await handleShootingTrigger(); return }
+    if (isShootingMode) { await handleShootingMiss(); return }
     if (!detectedQR?.isInReticle) return
     await shootTarget(detectedQR.qrCodeId)
-  }, [isShootingMode, handleShootingTrigger, detectedQR, shootTarget])
+  }, [isShootingMode, handleShootingMiss, detectedQR, shootTarget])
 
-  // スティッキー射撃（オートファイア / BT トリガー用）— shootingMode では常時発火許可
+  // スティッキー射撃（オートファイア / BT トリガー用）— shootingMode は外し扱い
   const handleShootSticky = useCallback(async () => {
-    if (isShootingMode) { await handleShootingTrigger(); return }
+    if (isShootingMode) { await handleShootingMiss(); return }
     const qrId = lastTargetQRIdRef.current
     if (!qrId) return
     await shootTarget(qrId)
-  }, [isShootingMode, handleShootingTrigger, shootTarget])
+  }, [isShootingMode, handleShootingMiss, shootTarget])
 
   // handleShootRef を最新の handleShootSticky に同期
   useEffect(() => { handleShootRef.current = handleShootSticky }, [handleShootSticky])
@@ -611,16 +608,16 @@ export default function GamePage() {
   }, [detectedQR?.isInReticle, detectedQR?.qrCodeId])
 
   // ── オートファイア ────────────────────────────────────────────────────────
-  // 通常モードは QR sticky 検知中のみ。シューティングモードは「エイム合致時」に発火。
-  const shootingAutoReady = isShootingMode && !!shooting.aimed && !shooting.isReloading && shooting.ammo > 0
+  // 通常モード: QR sticky 検知中のみ自動射撃。シューティングモードは無効（タップ式）。
   useEffect(() => {
+    if (isShootingMode) return
     if (!autoFireEnabled) return
-    if (!stickyInReticle && !shootingAutoReady) return
+    if (!stickyInReticle) return
     const interval = window.setInterval(() => {
       handleShootRef.current()
     }, AUTO_FIRE_HOLD_MS)
     return () => clearInterval(interval)
-  }, [stickyInReticle, autoFireEnabled, shootingAutoReady])
+  }, [stickyInReticle, autoFireEnabled, isShootingMode])
 
   // ── Bluetooth トリガー: キーボードイベント ────────────────────────────────
   useEffect(() => {
@@ -734,10 +731,12 @@ export default function GamePage() {
             isInReticle={stickyInReticle}
             offline={isOffline || cdBlock}
             markerMode={scanMode}
+            hideReticle={isShootingMode}
           />
           <HitFlash isFlashing={isFlashing} color={flashColor} />
           {isActive && <TimerDisplay remainingSeconds={remainingSeconds} />}
-          {selfPlayer && (
+          {/* シューティングモードは HP 無関係なので HP オーバーレイを隠す */}
+          {selfPlayer && !isShootingMode && (
             <HpOverlay
               selfPlayer={selfPlayer}
               allPlayers={players}
@@ -787,8 +786,8 @@ export default function GamePage() {
       <CountdownOverlay phase={cdPhase} count={cdCount} />
 
       {/* ミニマップ（ゲーム中、死亡スペクテイター含む）
-          Comms サボタージュ中はレーダー非表示 */}
-      {isActive && session && !(game?.sabotage_type === 'comms' && game.sabotage_until && new Date(game.sabotage_until) > new Date()) && (
+          Comms サボタージュ中・シューティングモードはレーダー非表示 */}
+      {isActive && session && !isShootingMode && !(game?.sabotage_type === 'comms' && game.sabotage_until && new Date(game.sabotage_until) > new Date()) && (
         <RadarOverlay
           selfPlayerId={session.playerId}
           players={players}
@@ -798,7 +797,7 @@ export default function GamePage() {
           storm={storm}
           game={game}
           npc={isHuntingMode ? npcState.npc : undefined}
-          position={isShootingMode ? 'bottom-right' : 'top-left'}
+          position="top-left"
         />
       )}
 
@@ -891,7 +890,7 @@ export default function GamePage() {
       )}
 
       {/* ── シューティングモード UI ──────────────────────────────────────────── */}
-      {isActive && isShootingMode && selfPlayer?.is_alive && geoPos && (
+      {isActive && isShootingMode && selfPlayer?.is_alive && (
         <>
           <ShootingHUD
             environment={shootingEnv}
@@ -904,51 +903,33 @@ export default function GamePage() {
             targetsActive={shooting.targets.length}
           />
           <ShootingTargetOverlay
-            geoPos={geoPos}
             targets={shooting.targets}
             environment={shootingEnv}
-            aimedId={shooting.aimed?.id ?? null}
             now={shooting.now}
+            locked={shooting.isReloading || shooting.ammo <= 0}
+            onHit={(t) => handleTargetTap(t.id)}
           />
           <ShootingScoreFeed feedRef={scoreFeedRef} />
           <ReloadOverlay visible={shooting.isReloading} progress={shooting.reloadProgress} />
 
-          {/* 射撃ボタン（画面下部中央）+ リロードボタン */}
-          <div className="fixed bottom-6 left-0 right-0 z-[66] flex items-end justify-center gap-6 pointer-events-none">
-            {/* マニュアルリロード */}
+          {/* リロードボタン（画面下中央、小型）。タップで強制リロード */}
+          <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[66] pointer-events-none">
             <button
               className={[
-                'pointer-events-auto w-14 h-14 rounded-full flex items-center justify-center',
-                'bg-black/60 border border-gray-600 active:scale-95 transition-transform',
-                (shooting.isReloading || shooting.ammo >= shooting.magSize)
-                  ? 'opacity-30'
-                  : 'opacity-80',
+                'pointer-events-auto w-16 h-16 rounded-full flex items-center justify-center',
+                'bg-black/70 border-2 active:scale-95 transition-transform shadow-lg',
+                shooting.isReloading
+                  ? 'border-amber-500 animate-pulse'
+                  : shooting.ammo <= shooting.magSize / 3
+                    ? 'border-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.5)]'
+                    : 'border-gray-600 opacity-70',
               ].join(' ')}
               onPointerDown={(e) => { e.stopPropagation(); shooting.manualReload() }}
               aria-label="リロード"
+              disabled={shooting.isReloading || shooting.ammo >= shooting.magSize}
             >
-              <span className="text-2xl">⟳</span>
+              <span className="text-3xl">⟳</span>
             </button>
-
-            {/* 射撃ボタン */}
-            <button
-              className={[
-                'pointer-events-auto w-24 h-24 rounded-full flex items-center justify-center',
-                'border-2 active:scale-95 transition-transform',
-                shooting.isReloading || shooting.ammo <= 0
-                  ? 'bg-gray-900/60 border-gray-700 opacity-40'
-                  : shooting.aimed
-                    ? 'bg-red-900/70 border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.5)]'
-                    : 'bg-black/60 border-white/30',
-              ].join(' ')}
-              onPointerDown={(e) => { e.stopPropagation(); handleShootingTrigger() }}
-              aria-label="射撃"
-            >
-              <span className="text-4xl">🔫</span>
-            </button>
-
-            {/* 右側スペーサー（対称レイアウト用） */}
-            <div className="w-14 h-14" />
           </div>
         </>
       )}
@@ -1204,30 +1185,32 @@ export default function GamePage() {
           )}
 
           {/* 上部コントロール（右側：モードバッジ + AUTO/MANUAL）
-              レーダーが左上を占有するため右側にまとめる */}
-          <div className="absolute top-4 right-4 flex flex-col items-end gap-2 pointer-events-none">
-            {/* モードバッジ */}
-            <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
-              scanMode === 'aruco'
-                ? 'bg-purple-900/70 border-purple-600 text-purple-300'
-                : 'bg-gray-900/70 border-gray-600 text-gray-400'
-            }`}>
-              {scanMode === 'aruco' ? '◈ ArUco' : '▦ QR'}
-            </span>
+              シューティングモードは QR スキャン/AUTO 不要なので非表示 */}
+          {!isShootingMode && (
+            <div className="absolute top-4 right-4 flex flex-col items-end gap-2 pointer-events-none">
+              {/* モードバッジ */}
+              <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
+                scanMode === 'aruco'
+                  ? 'bg-purple-900/70 border-purple-600 text-purple-300'
+                  : 'bg-gray-900/70 border-gray-600 text-gray-400'
+              }`}>
+                {scanMode === 'aruco' ? '◈ ArUco' : '▦ QR'}
+              </span>
 
-            {/* AUTO / MANUAL トグル */}
-            <button
-              onClick={() => setAutoFireEnabled((v) => !v)}
-              className={`pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
-                autoFireEnabled
-                  ? 'bg-red-600/80 border-red-500 text-white'
-                  : 'bg-black/60 border-gray-600 text-gray-400'
-              }`}
-            >
-              <span>{autoFireEnabled ? '🔴' : '⚪'}</span>
-              {autoFireEnabled ? 'AUTO' : 'MANUAL'}
-            </button>
-          </div>
+              {/* AUTO / MANUAL トグル */}
+              <button
+                onClick={() => setAutoFireEnabled((v) => !v)}
+                className={`pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
+                  autoFireEnabled
+                    ? 'bg-red-600/80 border-red-500 text-white'
+                    : 'bg-black/60 border-gray-600 text-gray-400'
+                }`}
+              >
+                <span>{autoFireEnabled ? '🔴' : '⚪'}</span>
+                {autoFireEnabled ? 'AUTO' : 'MANUAL'}
+              </button>
+            </div>
+          )}
         </>
       )}
 
