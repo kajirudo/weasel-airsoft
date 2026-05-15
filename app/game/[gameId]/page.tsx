@@ -25,6 +25,7 @@ import { NPCStatus }             from '@/components/game/NPCStatus'
 import { NPCAlert }              from '@/components/game/NPCAlert'
 import { NPCLungeWarning }       from '@/components/game/NPCLungeWarning'
 import { NPCAttackButton }       from '@/components/game/NPCAttackButton'
+import { AREntityOverlay }       from '@/components/game/AREntityOverlay'
 import { Button }                from '@/components/ui/Button'
 import { ShareGameId }           from '@/components/lobby/ShareGameId'
 import { GameSettings, type GameSettingsValues } from '@/components/lobby/GameSettings'
@@ -779,60 +780,41 @@ export default function GamePage() {
         />
       )}
 
-      {/* ── ソロプレイ: 近接ボット攻撃パネル ─────────────────────────────────── */}
-      {isActive && isSoloMode && selfPlayer?.is_alive && geoPos && (() => {
-        const nearbyBots = bots.filter(b => {
-          if (!b.is_alive || !b.lat || !b.lng) return false
-          return geoDistM({ lat: geoPos.lat, lng: geoPos.lng }, { lat: b.lat, lng: b.lng }) <= BOT_SHOOT_RANGE_M
-        }).sort((a, b) => {
-          const da = geoDistM({ lat: geoPos.lat, lng: geoPos.lng }, { lat: a.lat!, lng: a.lng! })
-          const db = geoDistM({ lat: geoPos.lat, lng: geoPos.lng }, { lat: b.lat!, lng: b.lng! })
-          return da - db
-        })
-        if (nearbyBots.length === 0) return null
-        return (
-          <div className="fixed bottom-32 left-0 right-0 flex justify-center z-40 pointer-events-none">
-            <div className="bg-black/80 rounded-2xl px-4 py-3 flex flex-col gap-2 max-w-xs w-full mx-4 pointer-events-auto">
-              <p className="text-gray-400 text-xs text-center">🎯 射程内の CPU</p>
-              {nearbyBots.slice(0, 3).map(bot => {
-                const dist = geoDistM({ lat: geoPos.lat, lng: geoPos.lng }, { lat: bot.lat!, lng: bot.lng! })
-                return (
-                  <button
-                    key={bot.id}
-                    disabled={isBotShooting}
-                    className="flex items-center justify-between bg-red-900/40 border border-red-700/50 rounded-xl px-3 py-2 active:bg-red-800/60 disabled:opacity-50"
-                    onPointerDown={async () => {
-                      if (!session || isBotShooting) return
-                      setIsBotShooting(true)
-                      try {
-                        const result = await playerShootBot({
-                          gameId,
-                          playerId: session.playerId,
-                          deviceId: session.deviceId,
-                          botId:    bot.id,
-                        })
-                        if (result.hit) {
-                          result.gameOver ? playKill() : playShot()
-                        }
-                      } catch { /* ignore */ }
-                      setIsBotShooting(false)
-                    }}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">🤖</span>
-                      <div className="text-left">
-                        <p className="text-white font-bold text-sm">{bot.name}</p>
-                        <p className="text-gray-400 text-xs">HP {bot.hp} / {dist.toFixed(0)}m</p>
-                      </div>
-                    </div>
-                    <span className="text-red-400 font-black text-lg">攻撃</span>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        )
-      })()}
+      {/* ── ハンティングモード: NPC AR オーバーレイ ───────────────────────────── */}
+      {isActive && isHuntingMode && selfPlayer?.is_alive && geoPos && npcState.npc && (
+        <AREntityOverlay
+          geoPos={geoPos}
+          npc={npcState.npc}
+          npcIsLunging={npcState.isLungeArming}
+        />
+      )}
+
+      {/* ── ソロプレイ: ボット AR オーバーレイ ────────────────────────────────── */}
+      {isActive && isSoloMode && selfPlayer?.is_alive && geoPos && (
+        <AREntityOverlay
+          geoPos={geoPos}
+          bots={bots}
+          botRangeM={BOT_SHOOT_RANGE_M}
+          botDisabled={isBotShooting}
+          onBotTap={async (botId) => {
+            if (!session || isBotShooting) return
+            setIsBotShooting(true)
+            try {
+              const result = await playerShootBot({
+                gameId,
+                playerId: session.playerId,
+                deviceId: session.deviceId,
+                botId,
+              })
+              if (result.hit) {
+                result.gameOver ? playKill() : playShot()
+              }
+            } catch { /* ignore */ }
+            setIsBotShooting(false)
+          }}
+        />
+      )}
+
 
       {/* ── Traitor モード UI ───────────────────────────────────────────────── */}
 

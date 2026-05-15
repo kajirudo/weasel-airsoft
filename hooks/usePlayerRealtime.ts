@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { RealtimePostgresChangesPayload, REALTIME_SUBSCRIBE_STATES } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
-import { toRealtimeStatus } from '@/hooks/realtimeStatus'
+import { toRealtimeStatus }  from '@/hooks/realtimeStatus'
+import type { RealtimeStatus } from '@/hooks/realtimeStatus'
 import type { Player } from '@/types/database'
 
 export type { RealtimeStatus } from '@/hooks/realtimeStatus'
