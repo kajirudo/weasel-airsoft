@@ -14,12 +14,12 @@ import {
   claimObjective,
   beginGenerator,
   completeGenerator,
-  completeMission,
   cancelGenerator,
   beginCapture,
   completeCapture,
   cancelCapture,
 } from '@/lib/game/actions'
+import { completeMission } from '@/lib/game/traitorActions'
 import { checkSealVictory } from '@/lib/game/npcActions'
 import { GENERATOR_HOLD_MS, CAPTURE_HOLD_MS } from '@/lib/game/constants'
 import { HoldButton } from '@/components/game/HoldButton'

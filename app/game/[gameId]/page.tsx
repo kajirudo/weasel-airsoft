@@ -49,8 +49,10 @@ import { useNPCVibration }       from '@/hooks/useNPCVibration'
 import { useBotController }      from '@/hooks/useBotController'
 import {
   registerHit, startGame, finishGameByTimeout, saveKillcamUrl, commitTacticsScore,
-  getMyRole, callMeeting, submitVote, resolveMeeting, useSabotage, investigatePlayer,
 } from '@/lib/game/actions'
+import {
+  getMyRole, callMeeting, submitVote, resolveMeeting, useSabotage, investigatePlayer,
+} from '@/lib/game/traitorActions'
 import { playerShootBot } from '@/lib/game/botActions'
 import { attackNPC, claimController } from '@/lib/game/npcActions'
 import { isHostPlayer } from '@/lib/game/utils'

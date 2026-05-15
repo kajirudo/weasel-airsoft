@@ -718,14 +718,4 @@ export async function saveKillcamUrl(params: {
     .eq('game_id', gameId)
 }
 
-// ── Traitor モード専用アクション（traitorActions.ts に分離）──────────────────
-export {
-  getMyRole,
-  callMeeting,
-  submitVote,
-  resolveMeeting,
-  useSabotage,
-  investigatePlayer,
-  completeMission,
-} from '@/lib/game/traitorActions'
 
